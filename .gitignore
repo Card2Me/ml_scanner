@@ -1,0 +1,57 @@
+# Flutter
+flutter/.dart_tool/
+flutter/.flutter-plugins
+flutter/.flutter-plugins-dependencies
+flutter/.packages
+flutter/build/
+flutter/pubspec.lock
+
+# Python
+model/venv/
+model/__pycache__/
+model/*.pyc
+model/*.pyo
+model/*.pyd
+model/.Python
+model/pip-log.txt
+model/pip-delete-this-directory.txt
+
+# MobileSAM
+model/MobileSAM/
+
+# Datasets (large files)
+model/dataset/
+
+# Model outputs
+model/output/
+model/weights/*.pt
+model/weights/*.pth
+model/weights/*.onnx
+model/weights/*.tflite
+
+# Jupyter Notebook
+model/.ipynb_checkpoints/
+model/*.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

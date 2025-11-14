@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Scanner - ML Model Tester</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📄 Document Scanner</h1>
+            <p>AI-powered document segmentation model tester</p>
+        </header>
+
+        <div class="content">
+            <!-- 입력 섹션 -->
+            <div class="input-section">
+                <h2>Input</h2>
+
+                <!-- 모델 선택 -->
+                <div class="model-selector">
+                    <label for="model-select">Select Model:</label>
+                    <select id="model-select">
+                        <option value="unet">Lightweight U-Net</option>
+                        <option value="deeplabv3plus">DeepLabV3+ MobileNet</option>
+                    </select>
+                </div>
+
+                <!-- 입력 방식 선택 -->
+                <div class="input-mode">
+                    <button id="upload-btn" class="mode-btn active">📁 Upload Image</button>
+                    <button id="camera-btn" class="mode-btn">📷 Use Camera</button>
+                </div>
+
+                <!-- 파일 업로드 -->
+                <div id="upload-area" class="upload-area">
+                    <input type="file" id="file-input" accept="image/*" style="display: none;">
+                    <div class="upload-placeholder" id="upload-placeholder">
+                        <p>Click or drag image here</p>
+                        <small>Supports: JPG, PNG, JPEG</small>
+                    </div>
+                    <img id="preview-image" class="preview-image" style="display: none;">
+                </div>
+
+                <!-- 카메라 -->
+                <div id="camera-area" class="camera-area" style="display: none;">
+                    <video id="video" class="video-stream" autoplay></video>
+                    <canvas id="canvas" style="display: none;"></canvas>
+                    <button id="capture-btn" class="capture-btn">📸 Capture</button>
+                </div>
+
+                <!-- 예측 버튼 -->
+                <button id="predict-btn" class="predict-btn" disabled>
+                    🚀 Run Prediction
+                </button>
+            </div>
+
+            <!-- 출력 섹션 -->
+            <div class="output-section">
+                <h2>Output</h2>
+
+                <div class="output-tabs">
+                    <button class="tab-btn active" data-tab="overlay">Overlay</button>
+                    <button class="tab-btn" data-tab="mask">Mask Only</button>
+                </div>
+
+                <div class="output-content">
+                    <div id="overlay-output" class="output-tab active">
+                        <div class="output-placeholder">
+                            <p>Prediction results will appear here</p>
+                        </div>
+                    </div>
+                    <div id="mask-output" class="output-tab">
+                        <div class="output-placeholder">
+                            <p>Segmentation mask will appear here</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="info-section" class="info-section" style="display: none;">
+                    <p><strong>Model:</strong> <span id="info-model">-</span></p>
+                    <p><strong>Status:</strong> <span id="info-status">-</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 로딩 오버레이 -->
+        <div id="loading-overlay" class="loading-overlay" style="display: none;">
+            <div class="spinner"></div>
+            <p>Processing...</p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

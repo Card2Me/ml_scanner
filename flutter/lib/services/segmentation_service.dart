@@ -36,6 +36,8 @@ class SegmentationResult {
     required this.postprocessTime,
     required this.confidence,
     required this.accelerated,
+    required this.segmentAreaRatio,
+    required this.isParallel,
     this.corners,
   });
 
@@ -49,6 +51,8 @@ class SegmentationResult {
   final Duration postprocessTime;
   final double confidence;
   final bool accelerated;
+  final double segmentAreaRatio; // 0-1, segment가 차지하는 비율
+  final bool isParallel; // 외곽선이 평행한지 여부
   final List<Corner>? corners;
 }
 
@@ -148,6 +152,12 @@ class SegmentationService {
       ).scale(scaleX.toDouble(), scaleY.toDouble());
     }).toList();
 
+    // Calculate segment area ratio
+    final segmentAreaRatio = _calculateSegmentAreaRatio(maskResult.mask);
+
+    // Check if corners form a parallel quadrilateral
+    final isParallel = _checkParallelQuadrilateral(rawCorners);
+
     inputTensor.release();
     for (final output in outputs) {
       output?.release();
@@ -166,6 +176,8 @@ class SegmentationService {
       postprocessTime: postprocessTime,
       confidence: maskResult.confidence,
       accelerated: _usingAccelerated,
+      segmentAreaRatio: segmentAreaRatio,
+      isParallel: isParallel,
       corners: scaledCorners,
     );
   }
@@ -473,6 +485,57 @@ class SegmentationService {
     final acx = c.x - a.x;
     final acy = c.y - a.y;
     return abx * acy - aby * acx;
+  }
+
+  static double _calculateSegmentAreaRatio(List<int> mask) {
+    if (mask.isEmpty) {
+      return 0.0;
+    }
+    final foregroundPixels = mask.where((pixel) => pixel > 0).length;
+    return foregroundPixels / mask.length;
+  }
+
+  static bool _checkParallelQuadrilateral(List<IntPoint>? corners) {
+    if (corners == null || corners.length != 4) {
+      return false;
+    }
+
+    // Check if opposite sides are parallel
+    // For a quadrilateral ABCD, check if AB is parallel to CD and BC is parallel to DA
+    final threshold = 0.2; // Angle tolerance in radians (~11 degrees)
+
+    // Calculate vectors for opposite sides
+    final side1 = _vectorFrom(corners[0], corners[1]);
+    final side2 = _vectorFrom(corners[1], corners[2]);
+    final side3 = _vectorFrom(corners[2], corners[3]);
+    final side4 = _vectorFrom(corners[3], corners[0]);
+
+    // Check if side1 is parallel to side3
+    final angle1 = _angleBetweenVectors(side1, side3);
+    final parallel1 = angle1.abs() < threshold || (math.pi - angle1).abs() < threshold;
+
+    // Check if side2 is parallel to side4
+    final angle2 = _angleBetweenVectors(side2, side4);
+    final parallel2 = angle2.abs() < threshold || (math.pi - angle2).abs() < threshold;
+
+    return parallel1 && parallel2;
+  }
+
+  static List<double> _vectorFrom(IntPoint from, IntPoint to) {
+    return [(to.x - from.x).toDouble(), (to.y - from.y).toDouble()];
+  }
+
+  static double _angleBetweenVectors(List<double> v1, List<double> v2) {
+    final dotProduct = v1[0] * v2[0] + v1[1] * v2[1];
+    final magnitude1 = math.sqrt(v1[0] * v1[0] + v1[1] * v1[1]);
+    final magnitude2 = math.sqrt(v2[0] * v2[0] + v2[1] * v2[1]);
+
+    if (magnitude1 == 0 || magnitude2 == 0) {
+      return 0;
+    }
+
+    final cosAngle = dotProduct / (magnitude1 * magnitude2);
+    return math.acos(cosAngle.clamp(-1.0, 1.0));
   }
 }
 

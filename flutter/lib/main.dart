@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 
 import 'services/segmentation_service.dart';
 
@@ -54,6 +56,12 @@ class _ScannerScreenState extends State<ScannerScreen>
   List<Offset>? _startCorners;
   List<Offset>? _targetCorners;
 
+  // New state variables
+  bool _isFlashOn = false;
+  bool _isTwoPageMode = false;
+  String _selectedFolder = '기본';
+  final List<String> _folders = ['기본'];
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +73,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           setState(() {});
         });
     _initialization = _initialize();
+    _loadFolders();
   }
 
   @override
@@ -154,6 +163,32 @@ class _ScannerScreenState extends State<ScannerScreen>
     _updateCorners(result);
   }
 
+  String? _getValidationMessage(SegmentationResult? result) {
+    if (result == null) {
+      return null;
+    }
+
+    // Priority order for validation messages
+    if (result.confidence < 0.7) {
+      return '문서나 책을 준비해 주세요';
+    }
+
+    if (result.segmentAreaRatio < 0.1) {
+      return '문서를 가깝게 해주세요';
+    }
+
+    final cornerCount = result.corners?.length ?? 0;
+    if (cornerCount < 4) {
+      return '문서 전체를 보이게 해주세요';
+    }
+
+    if (cornerCount == 4 && !result.isParallel) {
+      return '카메라를 평행하게 맞춰주세요';
+    }
+
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -167,10 +202,49 @@ class _ScannerScreenState extends State<ScannerScreen>
             return _ErrorState(message: snapshot.error.toString());
           }
           return SafeArea(
-            child: Column(
+            child: Stack(
               children: [
-                _buildCameraPreview(),
-                Expanded(child: _buildResultPanel()),
+                // Full screen camera preview
+                Positioned.fill(
+                  child: _buildCameraPreview(),
+                ),
+                // Validation message overlay (center)
+                if (_getValidationMessage(_latestResult) != null)
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 16,
+                      ),
+                      margin: const EdgeInsets.symmetric(horizontal: 32),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        _getValidationMessage(_latestResult)!,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                // Info overlay (top right, small)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: _buildInfoOverlay(),
+                ),
+                // Bottom control panel
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: _buildControlPanel(),
+                ),
               ],
             ),
           );
@@ -184,6 +258,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     if (controller == null || !controller.value.isInitialized) {
       return Container(
         width: double.infinity,
+        height: double.infinity,
         color: Colors.black,
         padding: const EdgeInsets.all(24),
         child: const Center(
@@ -202,119 +277,217 @@ class _ScannerScreenState extends State<ScannerScreen>
 
     return Container(
       width: double.infinity,
+      height: double.infinity,
       color: Colors.black,
-      child: AspectRatio(
-        aspectRatio: aspectRatio,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            CameraPreview(controller),
-            if (_latestResult != null)
-              IgnorePointer(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: _latestResult!.maskWidth.toDouble(),
-                    height: _latestResult!.maskHeight.toDouble(),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Opacity(
-                          opacity: 0.3,
-                          child: Image.memory(
-                            _latestResult!.maskBytes,
-                            fit: BoxFit.fill,
-                            gaplessPlayback: true,
-                            filterQuality: FilterQuality.low,
-                          ),
-                        ),
-                        if (_outlineSegments != null)
-                          CustomPaint(
-                            painter: _OutlinePainter(
-                              segments: _outlineSegments!,
-                              color: Colors.redAccent,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: aspectRatio,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CameraPreview(controller),
+              if (_latestResult != null)
+                IgnorePointer(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _latestResult!.maskWidth.toDouble(),
+                      height: _latestResult!.maskHeight.toDouble(),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Opacity(
+                            opacity: 0.3,
+                            child: Image.memory(
+                              _latestResult!.maskBytes,
+                              fit: BoxFit.fill,
+                              gaplessPlayback: true,
+                              filterQuality: FilterQuality.low,
                             ),
                           ),
-                      ],
+                          if (_outlineSegments != null)
+                            CustomPaint(
+                              painter: _OutlinePainter(
+                                segments: _outlineSegments!,
+                                color: Colors.redAccent,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoOverlay() {
+    final result = _latestResult;
+    if (result == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            '${(result.confidence * 100).toStringAsFixed(0)}%',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${result.totalTime.inMilliseconds}ms',
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlPanel() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.8),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Top icon buttons
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildIconButton(
+                icon: _isTwoPageMode ? Icons.book : Icons.description,
+                label: _isTwoPageMode ? '2페이지' : '1페이지',
+                onPressed: () {
+                  setState(() {
+                    _isTwoPageMode = !_isTwoPageMode;
+                  });
+                },
+              ),
+              _buildIconButton(
+                icon: _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                label: '플래시',
+                onPressed: _toggleFlash,
+              ),
+              _buildIconButton(
+                icon: Icons.settings,
+                label: '설정',
+                onPressed: () {
+                  // TODO: Open settings
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Middle row: Capture button and folder selector
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Folder selector
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: DropdownButton<String>(
+                  value: _selectedFolder,
+                  dropdownColor: Colors.grey.shade800,
+                  underline: const SizedBox.shrink(),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  items: _folders.map((folder) {
+                    return DropdownMenuItem(
+                      value: folder,
+                      child: Text(folder),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _selectedFolder = value;
+                      });
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 16),
+              // Capture button
+              GestureDetector(
+                onTap: _captureImage,
+                child: Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                    border: Border.all(
+                      color: Colors.teal,
+                      width: 4,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.teal.withOpacity(0.5),
+                        blurRadius: 10,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.camera_alt,
+                      color: Colors.teal,
+                      size: 32,
                     ),
                   ),
                 ),
               ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildResultPanel() {
-    if (_latestResult == null) {
-      return Container(
-        width: double.infinity,
-        color: Colors.grey.shade100,
-        padding: const EdgeInsets.all(16),
+  Widget _buildIconButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Live segmentation',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Icon(icon, color: Colors.white, size: 28),
             const SizedBox(height: 4),
-            const Text('카메라 영상에서 자동으로 문서 윤곽을 추적합니다.'),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                onPressed: _clearResult,
-                icon: const Icon(Icons.clear),
-                label: const Text('Clear'),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final result = _latestResult!;
-    return Container(
-      width: double.infinity,
-      color: Colors.grey.shade50,
-      padding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Latest segmentation',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(_formatDuration(result.totalTime)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text('Mask: ${result.maskWidth}x${result.maskHeight}'),
-            const SizedBox(height: 8),
-            _MetricsWrap(result: result, formatter: _formatDuration),
-
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                onPressed: _clearResult,
-                icon: const Icon(Icons.clear),
-                label: const Text('Clear'),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
               ),
             ),
           ],
@@ -323,15 +496,156 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
-  void _clearResult() {
-    setState(() {
-      _latestResult = null;
-      _error = null;
-    });
-    _startCorners = null;
-    _targetCorners = null;
-    _cornerController.stop();
+  Future<void> _toggleFlash() async {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    try {
+      await controller.setFlashMode(
+        _isFlashOn ? FlashMode.off : FlashMode.torch,
+      );
+      setState(() {
+        _isFlashOn = !_isFlashOn;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to toggle flash: $e';
+      });
+    }
   }
+
+  Future<void> _captureImage() async {
+    final controller = _cameraController;
+    final result = _latestResult;
+
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    if (result == null || result.corners == null || result.corners!.length < 4) {
+      _showSnackBar('문서가 제대로 인식되지 않았습니다.');
+      return;
+    }
+
+    try {
+      // 1. Stop image stream
+      await _stopImageStream();
+
+      // 2. Take picture
+      final xfile = await controller.takePicture();
+      final imageBytes = await xfile.readAsBytes();
+      final capturedImage = img.decodeImage(imageBytes);
+
+      if (capturedImage == null) {
+        throw StateError('Failed to decode captured image');
+      }
+
+      // 3. Apply orientation
+      final oriented = _applyOrientation(capturedImage);
+
+      // 4. Crop image using corners
+      final croppedImage = _cropImageWithPerspective(oriented, result.corners!);
+
+      // 5. Save to selected folder
+      await _saveImage(croppedImage, _selectedFolder);
+
+      _showSnackBar('이미지가 저장되었습니다.');
+
+      // 6. Resume image stream
+      await _startImageStream();
+    } catch (e) {
+      _showSnackBar('이미지 캡쳐 실패: $e');
+      await _startImageStream();
+    }
+  }
+
+  img.Image _cropImageWithPerspective(
+    img.Image source,
+    List<Corner> corners,
+  ) {
+    // For simplicity, we'll use a bounding box approach
+    // In a production app, you'd use perspective transform
+    final minX = corners.map((c) => c.x).reduce((a, b) => a < b ? a : b).toInt();
+    final minY = corners.map((c) => c.y).reduce((a, b) => a < b ? a : b).toInt();
+    final maxX = corners.map((c) => c.x).reduce((a, b) => a > b ? a : b).toInt();
+    final maxY = corners.map((c) => c.y).reduce((a, b) => a > b ? a : b).toInt();
+
+    final width = (maxX - minX).clamp(1, source.width - minX);
+    final height = (maxY - minY).clamp(1, source.height - minY);
+
+    return img.copyCrop(
+      source,
+      x: minX.clamp(0, source.width - 1),
+      y: minY.clamp(0, source.height - 1),
+      width: width,
+      height: height,
+    );
+  }
+
+  Future<void> _saveImage(img.Image image, String folderName) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final folderPath = '${directory.path}/ml_scanner/$folderName';
+    final folder = Directory(folderPath);
+
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final fileName = 'scan_$timestamp.png';
+    final filePath = '$folderPath/$fileName';
+
+    final pngBytes = img.encodePng(image);
+    final file = File(filePath);
+    await file.writeAsBytes(pngBytes);
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _loadFolders() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final basePath = '${directory.path}/ml_scanner';
+    final baseDir = Directory(basePath);
+
+    if (!await baseDir.exists()) {
+      await baseDir.create(recursive: true);
+      // Create default folder
+      final defaultFolder = Directory('$basePath/기본');
+      await defaultFolder.create();
+      return;
+    }
+
+    final entities = await baseDir.list().toList();
+    final folderNames = entities
+        .whereType<Directory>()
+        .map((dir) => dir.path.split('/').last)
+        .toList();
+
+    if (folderNames.isEmpty) {
+      final defaultFolder = Directory('$basePath/기본');
+      await defaultFolder.create();
+      folderNames.add('기본');
+    }
+
+    setState(() {
+      _folders.clear();
+      _folders.addAll(folderNames);
+      if (!_folders.contains(_selectedFolder)) {
+        _selectedFolder = _folders.first;
+      }
+    });
+  }
+
 
   /// Updates the target contour and kicks off the morphing animation whenever
   /// a confident set of corners arrives from the segmentation service.
@@ -448,10 +762,6 @@ class _ScannerScreenState extends State<ScannerScreen>
     return normals;
   }
 
-  String _formatDuration(Duration duration) {
-    return '${duration.inMilliseconds} ms';
-  }
-
   img.Image _applyOrientation(img.Image image) {
     final controller = _cameraController;
     if (controller == null) {
@@ -489,48 +799,6 @@ class _ErrorState extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
       ),
-    );
-  }
-}
-
-class _MetricsWrap extends StatelessWidget {
-  const _MetricsWrap({required this.result, required this.formatter});
-
-  final SegmentationResult result;
-  final String Function(Duration) formatter;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        _InfoChip(label: '전체', value: formatter(result.totalTime)),
-        _InfoChip(label: '전처리', value: formatter(result.preprocessTime)),
-        _InfoChip(label: '추론', value: formatter(result.inferenceTime)),
-        _InfoChip(label: '후처리', value: formatter(result.postprocessTime)),
-        _InfoChip(
-          label: '확신도',
-          value: '${(result.confidence * 100).toStringAsFixed(1)}%',
-        ),
-        _InfoChip(label: '가속', value: result.accelerated ? 'ON' : 'OFF'),
-      ],
-    );
-  }
-}
-
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Chip(
-      label: Text('$label: $value'),
-      side: BorderSide(color: Colors.teal.shade200),
-      backgroundColor: Colors.teal.shade50,
     );
   }
 }

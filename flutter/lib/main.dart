@@ -205,9 +205,7 @@ class _ScannerScreenState extends State<ScannerScreen>
             child: Stack(
               children: [
                 // Full screen camera preview
-                Positioned.fill(
-                  child: _buildCameraPreview(),
-                ),
+                Positioned.fill(child: _buildCameraPreview()),
                 // Validation message overlay (center)
                 if (_getValidationMessage(_latestResult) != null)
                   Center(
@@ -233,11 +231,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                     ),
                   ),
                 // Info overlay (top right, small)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: _buildInfoOverlay(),
-                ),
+                Positioned(top: 8, right: 8, child: _buildInfoOverlay()),
                 // Bottom control panel
                 Positioned(
                   bottom: 0,
@@ -279,7 +273,8 @@ class _ScannerScreenState extends State<ScannerScreen>
       width: double.infinity,
       height: double.infinity,
       color: Colors.black,
-      child: Center(
+      child: Align(
+        alignment: Alignment.topCenter,
         child: AspectRatio(
           aspectRatio: aspectRatio,
           child: Stack(
@@ -351,10 +346,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           const SizedBox(height: 2),
           Text(
             '${result.totalTime.inMilliseconds}ms',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 10),
           ),
         ],
       ),
@@ -405,7 +397,10 @@ class _ScannerScreenState extends State<ScannerScreen>
             children: [
               // Folder selector
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
@@ -416,10 +411,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                   underline: const SizedBox.shrink(),
                   style: const TextStyle(color: Colors.white, fontSize: 14),
                   items: _folders.map((folder) {
-                    return DropdownMenuItem(
-                      value: folder,
-                      child: Text(folder),
-                    );
+                    return DropdownMenuItem(value: folder, child: Text(folder));
                   }).toList(),
                   onChanged: (value) {
                     if (value != null) {
@@ -440,10 +432,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.white,
-                    border: Border.all(
-                      color: Colors.teal,
-                      width: 4,
-                    ),
+                    border: Border.all(color: Colors.teal, width: 4),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.teal.withOpacity(0.5),
@@ -453,11 +442,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                     ],
                   ),
                   child: const Center(
-                    child: Icon(
-                      Icons.camera_alt,
-                      color: Colors.teal,
-                      size: 32,
-                    ),
+                    child: Icon(Icons.camera_alt, color: Colors.teal, size: 32),
                   ),
                 ),
               ),
@@ -485,10 +470,7 @@ class _ScannerScreenState extends State<ScannerScreen>
             const SizedBox(height: 4),
             Text(
               label,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-              ),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ],
         ),
@@ -524,7 +506,9 @@ class _ScannerScreenState extends State<ScannerScreen>
       return;
     }
 
-    if (result == null || result.corners == null || result.corners!.length < 4) {
+    if (result == null ||
+        result.corners == null ||
+        result.corners!.length < 4) {
       _showSnackBar('문서가 제대로 인식되지 않았습니다.');
       return;
     }
@@ -561,16 +545,25 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
-  img.Image _cropImageWithPerspective(
-    img.Image source,
-    List<Corner> corners,
-  ) {
+  img.Image _cropImageWithPerspective(img.Image source, List<Corner> corners) {
     // For simplicity, we'll use a bounding box approach
     // In a production app, you'd use perspective transform
-    final minX = corners.map((c) => c.x).reduce((a, b) => a < b ? a : b).toInt();
-    final minY = corners.map((c) => c.y).reduce((a, b) => a < b ? a : b).toInt();
-    final maxX = corners.map((c) => c.x).reduce((a, b) => a > b ? a : b).toInt();
-    final maxY = corners.map((c) => c.y).reduce((a, b) => a > b ? a : b).toInt();
+    final minX = corners
+        .map((c) => c.x)
+        .reduce((a, b) => a < b ? a : b)
+        .toInt();
+    final minY = corners
+        .map((c) => c.y)
+        .reduce((a, b) => a < b ? a : b)
+        .toInt();
+    final maxX = corners
+        .map((c) => c.x)
+        .reduce((a, b) => a > b ? a : b)
+        .toInt();
+    final maxY = corners
+        .map((c) => c.y)
+        .reduce((a, b) => a > b ? a : b)
+        .toInt();
 
     final width = (maxX - minX).clamp(1, source.width - minX);
     final height = (maxY - minY).clamp(1, source.height - minY);
@@ -605,10 +598,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   void _showSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
 
@@ -645,7 +635,6 @@ class _ScannerScreenState extends State<ScannerScreen>
       }
     });
   }
-
 
   /// Updates the target contour and kicks off the morphing animation whenever
   /// a confident set of corners arrives from the segmentation service.

@@ -54,4 +54,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/models/deeplabv3plus_mobilenet_512.onnx
+    - assets/models/

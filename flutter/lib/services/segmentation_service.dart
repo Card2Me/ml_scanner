@@ -6,6 +6,24 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
 
+class IntPoint {
+  const IntPoint(this.x, this.y);
+
+  final int x;
+  final int y;
+}
+
+class Corner {
+  const Corner(this.x, this.y);
+
+  final double x;
+  final double y;
+
+  Corner scale(double scaleX, double scaleY) {
+    return Corner(x * scaleX, y * scaleY);
+  }
+}
+
 class SegmentationResult {
   const SegmentationResult({
     required this.overlayBytes,
@@ -18,6 +36,7 @@ class SegmentationResult {
     required this.postprocessTime,
     required this.confidence,
     required this.accelerated,
+    this.corners,
   });
 
   final Uint8List overlayBytes;
@@ -30,12 +49,13 @@ class SegmentationResult {
   final Duration postprocessTime;
   final double confidence;
   final bool accelerated;
+  final List<Corner>? corners;
 }
 
 class SegmentationService {
   static const _modelAssetPath =
-      'assets/models/deeplabv3plus_mobilenet_512.onnx';
-  static const int _inputSize = 512;
+      'assets/models/deeplabv3plus_mobilenet_256.onnx';
+  static const int _inputSize = 256;
   static const double _overlayAlpha = 0.45;
   static const _mean = [0.485, 0.456, 0.406];
   static const _std = [0.229, 0.224, 0.225];
@@ -70,6 +90,14 @@ class SegmentationService {
   }
 
   Future<SegmentationResult> segment(Uint8List imageBytes) async {
+    final originalImage = img.decodeImage(imageBytes);
+    if (originalImage == null) {
+      throw StateError('Failed to decode captured image.');
+    }
+    return segmentImage(originalImage);
+  }
+
+  Future<SegmentationResult> segmentImage(img.Image originalImage) async {
     if (!_initialized) {
       await initialize();
     }
@@ -82,16 +110,12 @@ class SegmentationService {
 
     final totalStart = DateTime.now();
     final preprocessStart = DateTime.now();
-    final originalImage = img.decodeImage(imageBytes);
-    if (originalImage == null) {
-      throw StateError('Failed to decode captured image.');
-    }
 
     final resized = img.copyResize(
       originalImage,
       width: _inputSize,
       height: _inputSize,
-      interpolation: img.Interpolation.linear,
+      interpolation: img.Interpolation.nearest,
     );
 
     final inputTensor = _buildInputTensor(resized);
@@ -99,13 +123,14 @@ class SegmentationService {
     final preprocessTime = DateTime.now().difference(preprocessStart);
 
     final inferenceStart = DateTime.now();
-    final outputs = session.run(runOptions, inputs);
-    final outputTensor = outputs.first as OrtValueTensor;
+    final outputs = await session.runAsync(runOptions, inputs);
+    final outputTensor = outputs!.first as OrtValueTensor;
     final logits = outputTensor.value as List<dynamic>;
     final inferenceTime = DateTime.now().difference(inferenceStart);
 
     final postprocessStart = DateTime.now();
     final maskResult = _maskFromLogits(logits, _inputSize, _inputSize);
+    final rawCorners = _findCorners(maskResult.mask, _inputSize, _inputSize);
     final maskImage = _maskToImage(maskResult.mask, _inputSize, _inputSize);
     final resizedMask = img.copyResize(
       maskImage,
@@ -113,7 +138,15 @@ class SegmentationService {
       height: originalImage.height,
       interpolation: img.Interpolation.nearest,
     );
-    final overlay = _overlayMask(originalImage, resizedMask);
+    final overlay = _overlayMask(originalImage, resizedMask, rawCorners);
+    final scaledCorners = rawCorners?.map((point) {
+      final scaleX = originalImage.width / _inputSize;
+      final scaleY = originalImage.height / _inputSize;
+      return Corner(
+        point.x.toDouble(),
+        point.y.toDouble(),
+      ).scale(scaleX.toDouble(), scaleY.toDouble());
+    }).toList();
 
     inputTensor.release();
     for (final output in outputs) {
@@ -133,6 +166,7 @@ class SegmentationService {
       postprocessTime: postprocessTime,
       confidence: maskResult.confidence,
       accelerated: _usingAccelerated,
+      corners: scaledCorners,
     );
   }
 
@@ -208,7 +242,7 @@ class SegmentationService {
         }
       }
       final confidence = pixelCount == 0 ? 0 : confidenceSum / pixelCount;
-      return _MaskResult(mask, confidence);
+      return _MaskResult(mask, confidence.toDouble());
     }
 
     final scores = List<double>.filled(classCount, 0);
@@ -240,7 +274,7 @@ class SegmentationService {
     }
 
     final confidence = pixelCount == 0 ? 0 : confidenceSum / pixelCount;
-    return _MaskResult(mask, confidence);
+    return _MaskResult(mask, confidence.toDouble());
   }
 
   static img.Image _maskToImage(List<int> mask, int width, int height) {
@@ -254,7 +288,11 @@ class SegmentationService {
     return maskImage;
   }
 
-  img.Image _overlayMask(img.Image original, img.Image mask) {
+  img.Image _overlayMask(
+    img.Image original,
+    img.Image mask,
+    List<IntPoint>? corners,
+  ) {
     final overlay = img.Image.from(original);
     for (var y = 0; y < overlay.height; y++) {
       for (var x = 0; x < overlay.width; x++) {
@@ -275,6 +313,31 @@ class SegmentationService {
         overlay.setPixelRgba(x, y, blendedR, blendedG, blendedB, a);
       }
     }
+
+    if (corners != null && corners.length >= 3) {
+      final scaleX = original.width / _inputSize;
+      final scaleY = original.height / _inputSize;
+      final scaled = corners.map((point) {
+        final x = (point.x * scaleX).round();
+        final y = (point.y * scaleY).round();
+        return IntPoint(x, y);
+      }).toList();
+      final smoothed = _smoothPolyline(scaled);
+      for (var i = 0; i < smoothed.length; i++) {
+        final start = smoothed[i];
+        final end = smoothed[(i + 1) % smoothed.length];
+        img.drawLine(
+          overlay,
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y,
+          color: img.ColorRgba8(255, 0, 0, 255),
+          thickness: 3,
+        );
+      }
+    }
+
     return overlay;
   }
 
@@ -303,6 +366,114 @@ class SegmentationService {
     }
     return false;
   }
+
+  List<IntPoint>? _findCorners(List<int> mask, int width, int height) {
+    final points = _extractSignificantPoints(mask, width, height);
+    if (points == null || points.isEmpty) {
+      return null;
+    }
+    final hull = _convexHull(points);
+    return hull;
+  }
+
+  List<IntPoint>? _extractSignificantPoints(
+    List<int> mask,
+    int width,
+    int height,
+  ) {
+    final visited = List<bool>.filled(mask.length, false);
+    final components = <List<IntPoint>>[];
+
+    final directions = const [
+      IntPoint(1, 0),
+      IntPoint(-1, 0),
+      IntPoint(0, 1),
+      IntPoint(0, -1),
+    ];
+
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        final index = y * width + x;
+        if (mask[index] == 0 || visited[index]) {
+          continue;
+        }
+        final queue = <int>[index];
+        final component = <IntPoint>[];
+        visited[index] = true;
+        while (queue.isNotEmpty) {
+          final current = queue.removeLast();
+          final cx = current % width;
+          final cy = current ~/ width;
+          component.add(IntPoint(cx, cy));
+          for (final dir in directions) {
+            final nx = cx + dir.x;
+            final ny = cy + dir.y;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+              continue;
+            }
+            final nIndex = ny * width + nx;
+            if (mask[nIndex] == 0 || visited[nIndex]) {
+              continue;
+            }
+            visited[nIndex] = true;
+            queue.add(nIndex);
+          }
+        }
+        components.add(component);
+      }
+    }
+
+    if (components.isEmpty) {
+      return null;
+    }
+
+    if (components.length == 1) {
+      return components.first;
+    }
+
+    components.sort((a, b) => a.length.compareTo(b.length));
+    components.removeAt(0); // remove the smallest component
+
+    final merged = <IntPoint>[];
+    for (final component in components) {
+      merged.addAll(component);
+    }
+    return merged;
+  }
+
+  List<IntPoint> _convexHull(List<IntPoint> points) {
+    points.sort((a, b) {
+      final dx = a.x - b.x;
+      return dx != 0 ? dx : a.y - b.y;
+    });
+    final lower = <IntPoint>[];
+    for (final p in points) {
+      while (lower.length >= 2 &&
+          _cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+        lower.removeLast();
+      }
+      lower.add(p);
+    }
+    final upper = <IntPoint>[];
+    for (final p in points.reversed) {
+      while (upper.length >= 2 &&
+          _cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+        upper.removeLast();
+      }
+      upper.add(p);
+    }
+    lower.removeLast();
+    upper.removeLast();
+    return [...lower, ...upper];
+  }
+
+  int _cross(IntPoint a, IntPoint b, IntPoint c) {
+    final abx = b.x - a.x;
+    final aby = b.y - a.y;
+    final acx = c.x - a.x;
+    final acy = c.y - a.y;
+    return abx * acy - aby * acx;
+  }
 }
 
 class _MaskResult {
@@ -310,4 +481,20 @@ class _MaskResult {
 
   final List<int> mask;
   final double confidence;
+}
+
+List<IntPoint> _smoothPolyline(List<IntPoint> points) {
+  if (points.length <= 2) {
+    return points;
+  }
+  final smoothed = <IntPoint>[];
+  for (var i = 0; i < points.length; i++) {
+    final prev = points[(i - 1 + points.length) % points.length];
+    final current = points[i];
+    final next = points[(i + 1) % points.length];
+    final avgX = ((prev.x + current.x + next.x) / 3).round();
+    final avgY = ((prev.y + current.y + next.y) / 3).round();
+    smoothed.add(IntPoint(avgX, avgY));
+  }
+  return smoothed;
 }

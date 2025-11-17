@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+import 'screens/folder_manager_screen.dart';
+import 'screens/image_detail_screen.dart';
 import 'services/segmentation_service.dart';
 
 /// 앱 진입점
@@ -62,8 +64,9 @@ class _ScannerScreenState extends State<ScannerScreen>
   bool _isFlashOn = false; // 플래시 상태
   bool _isTwoPageMode = false; // 2페이지 스캔 모드
   String _selectedFolder = '기본'; // 선택된 폴더
-  final List<String> _folders = ['기본']; // 폴더 목록
+  final Map<String, int> _folderFileCounts = {}; // 폴더별 파일 개수
   String? _lastCapturedImagePath; // 마지막 캡처된 이미지 경로
+  int _lastCapturedFolderFileCount = 0; // 마지막 캡처된 폴더의 파일 개수
 
   @override
   void initState() {
@@ -440,17 +443,29 @@ class _ScannerScreenState extends State<ScannerScreen>
         underline: const SizedBox.shrink(),
         style: const TextStyle(color: Colors.white, fontSize: 14),
         items: [
-          ..._folders.map((folder) {
-            return DropdownMenuItem(value: folder, child: Text(folder));
+          ..._folderFileCounts.keys.map((folder) {
+            final count = _folderFileCounts[folder] ?? 0;
+            return DropdownMenuItem(
+              value: folder,
+              child: Text('$folder ($count)'),
+            );
           }),
           const DropdownMenuItem(
             value: '__manage__',
             child: Text('폴더 관리...'),
           ),
         ],
-        onChanged: (value) {
+        onChanged: (value) async {
           if (value == '__manage__') {
-            // TODO: 폴더 관리 화면 열기
+            // 폴더 관리 화면 열기
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const FolderManagerScreen(),
+              ),
+            );
+            // 돌아왔을 때 폴더 목록 새로고침
+            await _loadFolders();
           } else if (value != null) {
             setState(() {
               _selectedFolder = value;
@@ -512,18 +527,55 @@ class _ScannerScreenState extends State<ScannerScreen>
 
     return GestureDetector(
       onTap: () {
-        // TODO: 이미지 상세 화면으로 이동
-      },
-      child: Container(
-        width: 50,
-        height: 50,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          image: DecorationImage(
-            image: FileImage(File(_lastCapturedImagePath!)),
-            fit: BoxFit.cover,
+        // 이미지 상세 화면으로 이동
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ImageDetailScreen(
+              imagePath: _lastCapturedImagePath!,
+              imageTitle: _lastCapturedImagePath!.split('/').last,
+            ),
           ),
-        ),
+        );
+      },
+      child: Stack(
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              image: DecorationImage(
+                image: FileImage(File(_lastCapturedImagePath!)),
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          // 파일 개수 표시
+          if (_lastCapturedFolderFileCount > 0)
+            Positioned(
+              bottom: 2,
+              right: 2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 4,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '$_lastCapturedFolderFileCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -614,8 +666,12 @@ class _ScannerScreenState extends State<ScannerScreen>
       // 5. 선택된 폴더에 저장
       final savedPath = await _saveImage(croppedImage, _selectedFolder);
 
+      // 6. 폴더 파일 개수 업데이트
+      await _loadFolders();
+
       setState(() {
         _lastCapturedImagePath = savedPath;
+        _lastCapturedFolderFileCount = _folderFileCounts[_selectedFolder] ?? 0;
       });
 
       _showSnackBar('이미지가 저장되었습니다.');
@@ -717,22 +773,28 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     final entities = await baseDir.list().toList();
-    final folderNames = entities
-        .whereType<Directory>()
-        .map((dir) => dir.path.split('/').last)
-        .toList();
+    final folderData = <String, int>{};
 
-    if (folderNames.isEmpty) {
+    for (final entity in entities.whereType<Directory>()) {
+      final folderName = entity.path.split('/').last;
+      final files = await entity.list().toList();
+      final fileCount = files.whereType<File>().where((file) {
+        return file.path.endsWith('.png') || file.path.endsWith('.pdf');
+      }).length;
+      folderData[folderName] = fileCount;
+    }
+
+    if (folderData.isEmpty) {
       final defaultFolder = Directory('$basePath/기본');
       await defaultFolder.create();
-      folderNames.add('기본');
+      folderData['기본'] = 0;
     }
 
     setState(() {
-      _folders.clear();
-      _folders.addAll(folderNames);
-      if (!_folders.contains(_selectedFolder)) {
-        _selectedFolder = _folders.first;
+      _folderFileCounts.clear();
+      _folderFileCounts.addAll(folderData);
+      if (!_folderFileCounts.containsKey(_selectedFolder)) {
+        _selectedFolder = _folderFileCounts.keys.first;
       }
     });
   }

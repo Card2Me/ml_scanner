@@ -136,8 +136,14 @@ class SegmentationService {
 
     final postprocessStart = DateTime.now();
     final maskResult = _maskFromLogits(logits, _inputSize, _inputSize);
-    final points = _extractSignificantPoints(maskResult.mask, _inputSize, _inputSize);
-    final hull = points != null && points.isNotEmpty ? _convexHull(points) : null;
+    final points = _extractSignificantPoints(
+      maskResult.mask,
+      _inputSize,
+      _inputSize,
+    );
+    final hull = points != null && points.isNotEmpty
+        ? _convexHull(points)
+        : null;
     final rawCorners = hull != null ? _approximateToQuadrilateral(hull) : null;
     final maskImage = _maskToImage(maskResult.mask, _inputSize, _inputSize);
     final resizedMask = img.copyResize(
@@ -484,7 +490,11 @@ class SegmentationService {
   }
 
   /// Calculate perpendicular distance from point to line segment
-  double _perpendicularDistance(IntPoint point, IntPoint lineStart, IntPoint lineEnd) {
+  double _perpendicularDistance(
+    IntPoint point,
+    IntPoint lineStart,
+    IntPoint lineEnd,
+  ) {
     final dx = lineEnd.x - lineStart.x;
     final dy = lineEnd.y - lineStart.y;
     final norm = math.sqrt(dx * dx + dy * dy);
@@ -495,7 +505,8 @@ class SegmentationService {
       return math.sqrt(pdx * pdx + pdy * pdy);
     }
 
-    return ((point.y - lineStart.y) * dx - (point.x - lineStart.x) * dy).abs() / norm;
+    return ((point.y - lineStart.y) * dx - (point.x - lineStart.x) * dy).abs() /
+        norm;
   }
 
   /// Select 4 corners from a polygon by finding the most distant points
@@ -590,7 +601,8 @@ class SegmentationService {
     var topLeftIndex = 0;
     for (var i = 1; i < 4; i++) {
       if (sorted[i].y < sorted[topLeftIndex].y ||
-          (sorted[i].y == sorted[topLeftIndex].y && sorted[i].x < sorted[topLeftIndex].x)) {
+          (sorted[i].y == sorted[topLeftIndex].y &&
+              sorted[i].x < sorted[topLeftIndex].x)) {
         topLeftIndex = i;
       }
     }
@@ -728,11 +740,13 @@ class SegmentationService {
 
     // Check if side1 is parallel to side3
     final angle1 = _angleBetweenVectors(side1, side3);
-    final parallel1 = angle1.abs() < threshold || (math.pi - angle1).abs() < threshold;
+    final parallel1 =
+        angle1.abs() < threshold || (math.pi - angle1).abs() < threshold;
 
     // Check if side2 is parallel to side4
     final angle2 = _angleBetweenVectors(side2, side4);
-    final parallel2 = angle2.abs() < threshold || (math.pi - angle2).abs() < threshold;
+    final parallel2 =
+        angle2.abs() < threshold || (math.pi - angle2).abs() < threshold;
 
     return parallel1 && parallel2;
   }
@@ -834,9 +848,16 @@ class PerspectiveTransform {
         );
 
         // Get pixel from source image with bilinear interpolation
-        final pixel = _getPixelBilinear(source, srcX, srcY);
-        if (pixel != null) {
-          output.setPixel(dstX, dstY, pixel);
+        final color = _getPixelBilinear(source, srcX, srcY);
+        if (color != null) {
+          output.setPixelRgba(
+            dstX,
+            dstY,
+            color.r.toInt(),
+            color.g.toInt(),
+            color.b.toInt(),
+            color.a.toInt(),
+          );
         }
       }
     }
@@ -861,12 +882,22 @@ class PerspectiveTransform {
   }
 
   /// Get pixel value with bilinear interpolation
-  static img.Pixel? _getPixelBilinear(img.Image image, double x, double y) {
+  static img.ColorRgba8? _getPixelBilinear(
+    img.Image image,
+    double x,
+    double y,
+  ) {
     if (x < 0 || y < 0 || x >= image.width - 1 || y >= image.height - 1) {
       // Handle edge cases
       final ix = x.round().clamp(0, image.width - 1);
       final iy = y.round().clamp(0, image.height - 1);
-      return image.getPixel(ix, iy);
+      final pixel = image.getPixel(ix, iy);
+      return img.ColorRgba8(
+        pixel.r.toInt(),
+        pixel.g.toInt(),
+        pixel.b.toInt(),
+        pixel.a.toInt(),
+      );
     }
 
     final x0 = x.floor();
@@ -882,25 +913,35 @@ class PerspectiveTransform {
     final p01 = image.getPixel(x0, y1);
     final p11 = image.getPixel(x1, y1);
 
-    final r = ((1 - fx) * (1 - fy) * p00.r +
-            fx * (1 - fy) * p10.r +
-            (1 - fx) * fy * p01.r +
-            fx * fy * p11.r)
-        .round();
+    final r =
+        ((1 - fx) * (1 - fy) * p00.r +
+                fx * (1 - fy) * p10.r +
+                (1 - fx) * fy * p01.r +
+                fx * fy * p11.r)
+            .round();
 
-    final g = ((1 - fx) * (1 - fy) * p00.g +
-            fx * (1 - fy) * p10.g +
-            (1 - fx) * fy * p01.g +
-            fx * fy * p11.g)
-        .round();
+    final g =
+        ((1 - fx) * (1 - fy) * p00.g +
+                fx * (1 - fy) * p10.g +
+                (1 - fx) * fy * p01.g +
+                fx * fy * p11.g)
+            .round();
 
-    final b = ((1 - fx) * (1 - fy) * p00.b +
-            fx * (1 - fy) * p10.b +
-            (1 - fx) * fy * p01.b +
-            fx * fy * p11.b)
-        .round();
+    final b =
+        ((1 - fx) * (1 - fy) * p00.b +
+                fx * (1 - fy) * p10.b +
+                (1 - fx) * fy * p01.b +
+                fx * fy * p11.b)
+            .round();
 
-    return img.ColorRgb8(r, g, b);
+    final a =
+        ((1 - fx) * (1 - fy) * p00.a +
+                fx * (1 - fy) * p10.a +
+                (1 - fx) * fy * p01.a +
+                fx * fy * p11.a)
+            .round();
+
+    return img.ColorRgba8(r, g, b, a);
   }
 
   static List<Corner> _orderCornersForTransform(List<Corner> corners) {

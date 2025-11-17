@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
 
+/// 정수 좌표를 나타내는 클래스
 class IntPoint {
   const IntPoint(this.x, this.y);
 
@@ -13,17 +14,21 @@ class IntPoint {
   final int y;
 }
 
+/// 실수 좌표를 나타내는 코너 클래스
+/// 문서의 꼭지점 위치를 저장
 class Corner {
   const Corner(this.x, this.y);
 
   final double x;
   final double y;
 
+  /// 좌표를 스케일 팩터로 확대/축소
   Corner scale(double scaleX, double scaleY) {
     return Corner(x * scaleX, y * scaleY);
   }
 }
 
+/// 문서 세그멘테이션 결과를 담는 클래스
 class SegmentationResult {
   const SegmentationResult({
     required this.overlayBytes,
@@ -42,37 +47,41 @@ class SegmentationResult {
     this.polygon,
   });
 
-  final Uint8List overlayBytes;
-  final Uint8List maskBytes;
-  final int maskWidth;
-  final int maskHeight;
-  final Duration totalTime;
-  final Duration preprocessTime;
-  final Duration inferenceTime;
-  final Duration postprocessTime;
-  final double confidence;
-  final bool accelerated;
-  final double segmentAreaRatio; // 0-1, segment가 차지하는 비율
+  final Uint8List overlayBytes; // 오버레이 이미지 바이트 (사용 안함)
+  final Uint8List maskBytes; // 마스크 이미지 바이트
+  final int maskWidth; // 마스크 너비
+  final int maskHeight; // 마스크 높이
+  final Duration totalTime; // 전체 처리 시간
+  final Duration preprocessTime; // 전처리 시간
+  final Duration inferenceTime; // 추론 시간
+  final Duration postprocessTime; // 후처리 시간
+  final double confidence; // 확신도 (0.0 ~ 1.0)
+  final bool accelerated; // 하드웨어 가속 사용 여부
+  final double segmentAreaRatio; // 세그먼트가 차지하는 영역 비율 (0.0 ~ 1.0)
   final bool isParallel; // 외곽선이 평행한지 여부
-  final List<Corner>? corners; // 4점 사각형 근사
+  final List<Corner>? corners; // 4점 사각형 근사 좌표
   final List<Corner>? polygon; // 원래 다각형 (convex hull)
 }
 
+/// 문서 세그멘테이션 서비스
+/// ONNX 런타임을 사용하여 이미지에서 문서 영역을 탐지
 class SegmentationService {
   static const _modelAssetPath =
       'assets/models/deeplabv3plus_mobilenet_256.onnx';
-  static const int _inputSize = 256;
-  static const double _overlayAlpha = 0.45;
-  static const _mean = [0.485, 0.456, 0.406];
-  static const _std = [0.229, 0.224, 0.225];
+  static const int _inputSize = 256; // 모델 입력 크기
+  static const double _overlayAlpha = 0.45; // 오버레이 투명도 (사용 안함)
+  static const _mean = [0.485, 0.456, 0.406]; // 정규화 평균값
+  static const _std = [0.229, 0.224, 0.225]; // 정규화 표준편차
 
-  OrtSession? _session;
-  OrtSessionOptions? _sessionOptions;
-  OrtRunOptions? _runOptions;
-  String? _inputName;
-  bool _initialized = false;
-  bool _usingAccelerated = false;
+  OrtSession? _session; // ONNX 세션
+  OrtSessionOptions? _sessionOptions; // 세션 옵션
+  OrtRunOptions? _runOptions; // 실행 옵션
+  String? _inputName; // 입력 텐서 이름
+  bool _initialized = false; // 초기화 여부
+  bool _usingAccelerated = false; // 하드웨어 가속 사용 여부
 
+  /// ONNX 런타임 초기화
+  /// 모델 로드 및 세션 설정
   Future<void> initialize() async {
     if (_initialized) {
       return;
@@ -95,6 +104,7 @@ class SegmentationService {
     _initialized = true;
   }
 
+  /// 이미지 바이트로부터 세그멘테이션 수행
   Future<SegmentationResult> segment(Uint8List imageBytes) async {
     final originalImage = img.decodeImage(imageBytes);
     if (originalImage == null) {
@@ -103,6 +113,8 @@ class SegmentationService {
     return segmentImage(originalImage);
   }
 
+  /// 이미지 객체로부터 세그멘테이션 수행
+  /// 문서 영역을 탐지하고 꼭지점 좌표를 반환
   Future<SegmentationResult> segmentImage(img.Image originalImage) async {
     if (!_initialized) {
       await initialize();
@@ -203,6 +215,7 @@ class SegmentationService {
     );
   }
 
+  /// 리소스 해제
   void dispose() {
     _session?.release();
     _session = null;
@@ -215,6 +228,8 @@ class SegmentationService {
     _usingAccelerated = false;
   }
 
+  /// 이미지를 ONNX 입력 텐서로 변환
+  /// RGB 채널을 정규화하여 Float32 텐서 생성
   static OrtValueTensor _buildInputTensor(img.Image image) {
     final totalPixels = image.width * image.height;
     final buffer = Float32List(totalPixels * 3);
@@ -243,6 +258,8 @@ class SegmentationService {
     ]);
   }
 
+  /// 모델 출력 로짓으로부터 마스크 생성
+  /// 소프트맥스를 적용하여 이진 마스크와 확신도 계산
   static _MaskResult _maskFromLogits(
     List<dynamic> logits,
     int width,
@@ -310,6 +327,8 @@ class SegmentationService {
     return _MaskResult(mask, confidence.toDouble());
   }
 
+  /// 마스크 배열을 이미지로 변환
+  /// 1은 흰색(255), 0은 검은색(0)으로 매핑
   static img.Image _maskToImage(List<int> mask, int width, int height) {
     final maskImage = img.Image(width: width, height: height);
     for (var y = 0; y < height; y++) {
@@ -321,92 +340,32 @@ class SegmentationService {
     return maskImage;
   }
 
+  /// 마스크를 원본 이미지에 오버레이 (사용 안함 - 그림자 제거)
+  /// 빈 이미지를 반환하도록 수정
   img.Image _overlayMask(
     img.Image original,
     img.Image mask,
     List<IntPoint>? polygon,
     List<IntPoint>? corners,
   ) {
+    // 그림자 효과 제거를 위해 오버레이 없이 빈 이미지 반환
     final overlay = img.Image.from(original);
-    for (var y = 0; y < overlay.height; y++) {
-      for (var x = 0; x < overlay.width; x++) {
-        final maskPixel = mask.getPixel(x, y);
-        final maskValue = maskPixel.r.toInt();
-        if (maskValue == 0) {
-          continue;
-        }
-        final pixel = overlay.getPixel(x, y);
-        final r = pixel.r.toDouble();
-        final g = pixel.g.toDouble();
-        final b = pixel.b.toDouble();
-        final a = pixel.a.toInt();
-        final blendedR = ((1 - _overlayAlpha) * r).round();
-        final blendedG = ((1 - _overlayAlpha) * g + _overlayAlpha * 255.0)
-            .round();
-        final blendedB = ((1 - _overlayAlpha) * b).round();
-        overlay.setPixelRgba(x, y, blendedR, blendedG, blendedB, a);
-      }
-    }
-
-    final scaleX = original.width / _inputSize;
-    final scaleY = original.height / _inputSize;
-
-    // Draw polygon (convex hull) with weak/transparent line
-    if (polygon != null && polygon.length >= 3) {
-      final scaled = polygon.map((point) {
-        final x = (point.x * scaleX).round();
-        final y = (point.y * scaleY).round();
-        return IntPoint(x, y);
-      }).toList();
-      final smoothed = _smoothPolyline(scaled);
-      for (var i = 0; i < smoothed.length; i++) {
-        final start = smoothed[i];
-        final end = smoothed[(i + 1) % smoothed.length];
-        img.drawLine(
-          overlay,
-          x1: start.x,
-          y1: start.y,
-          x2: end.x,
-          y2: end.y,
-          color: img.ColorRgba8(255, 255, 0, 128), // Yellow, semi-transparent
-          thickness: 2,
-        );
-      }
-    }
-
-    // Draw 4-point quadrilateral with strong line
-    if (corners != null && corners.length == 4) {
-      final scaled = corners.map((point) {
-        final x = (point.x * scaleX).round();
-        final y = (point.y * scaleY).round();
-        return IntPoint(x, y);
-      }).toList();
-      for (var i = 0; i < scaled.length; i++) {
-        final start = scaled[i];
-        final end = scaled[(i + 1) % scaled.length];
-        img.drawLine(
-          overlay,
-          x1: start.x,
-          y1: start.y,
-          x2: end.x,
-          y2: end.y,
-          color: img.ColorRgba8(0, 255, 0, 255), // Green, fully opaque
-          thickness: 4,
-        );
-      }
-    }
-
     return overlay;
   }
 
+  /// 이미지를 PNG 바이트로 인코딩
   static Uint8List _encodeImage(img.Image image) {
     return Uint8List.fromList(img.encodePng(image));
   }
 
+  /// 시그모이드 함수
+  /// 로짓 값을 0~1 확률로 변환
   static double _sigmoid(double value) {
     return 1 / (1 + math.exp(-value));
   }
 
+  /// 하드웨어 가속 활성화 시도
+  /// Android는 NNAPI, iOS/macOS는 CoreML 사용
   bool _tryEnableAcceleration() {
     final options = _sessionOptions;
     if (options == null) {
@@ -425,7 +384,7 @@ class SegmentationService {
     return false;
   }
 
-  /// Approximates a polygon to a 4-point quadrilateral using Douglas-Peucker algorithm
+  /// Douglas-Peucker 알고리즘을 사용하여 다각형을 4점 사각형으로 근사
   List<IntPoint>? _approximateToQuadrilateral(List<IntPoint> polygon) {
     if (polygon.length < 3) {
       return null;
@@ -459,7 +418,8 @@ class SegmentationService {
     return _orderCorners(simplified);
   }
 
-  /// Douglas-Peucker polygon simplification algorithm
+  /// Douglas-Peucker 다각형 단순화 알고리즘
+  /// epsilon 값보다 큰 거리의 점만 유지
   List<IntPoint> _douglasPeucker(List<IntPoint> points, double epsilon) {
     if (points.length < 3) {
       return points;
@@ -489,7 +449,7 @@ class SegmentationService {
     }
   }
 
-  /// Calculate perpendicular distance from point to line segment
+  /// 점에서 선분까지의 수직 거리 계산
   double _perpendicularDistance(
     IntPoint point,
     IntPoint lineStart,
@@ -509,7 +469,8 @@ class SegmentationService {
         norm;
   }
 
-  /// Select 4 corners from a polygon by finding the most distant points
+  /// 다각형에서 가장 먼 4개의 꼭지점 선택
+  /// 중심점으로부터 top-left, top-right, bottom-right, bottom-left 계산
   List<IntPoint> _selectFourCorners(List<IntPoint> points) {
     if (points.length <= 4) {
       return points;
@@ -573,7 +534,7 @@ class SegmentationService {
     ];
   }
 
-  /// Order corners in clockwise order starting from top-left
+  /// 꼭지점을 top-left부터 시계방향으로 정렬
   List<IntPoint> _orderCorners(List<IntPoint> corners) {
     if (corners.length != 4) {
       return corners;
@@ -616,6 +577,8 @@ class SegmentationService {
     ];
   }
 
+  /// 마스크에서 유의미한 점들 추출
+  /// Connected Component Analysis를 사용하여 가장 큰 영역의 점들 반환
   List<IntPoint>? _extractSignificantPoints(
     List<int> mask,
     int width,
@@ -681,6 +644,8 @@ class SegmentationService {
     return merged;
   }
 
+  /// Convex Hull 알고리즘 (Graham Scan)
+  /// 점들의 볼록 껍질을 계산
   List<IntPoint> _convexHull(List<IntPoint> points) {
     points.sort((a, b) {
       final dx = a.x - b.x;
@@ -707,6 +672,8 @@ class SegmentationService {
     return [...lower, ...upper];
   }
 
+  /// 외적 계산
+  /// Convex Hull 알고리즘에서 점들의 회전 방향 판단
   int _cross(IntPoint a, IntPoint b, IntPoint c) {
     final abx = b.x - a.x;
     final aby = b.y - a.y;
@@ -715,6 +682,8 @@ class SegmentationService {
     return abx * acy - aby * acx;
   }
 
+  /// 세그먼트 영역 비율 계산
+  /// 전체 이미지에서 문서가 차지하는 비율
   static double _calculateSegmentAreaRatio(List<int> mask) {
     if (mask.isEmpty) {
       return 0.0;
@@ -723,6 +692,8 @@ class SegmentationService {
     return foregroundPixels / mask.length;
   }
 
+  /// 사각형이 평행사변형인지 확인
+  /// 대변이 평행한지 각도로 판단
   static bool _checkParallelQuadrilateral(List<IntPoint>? corners) {
     if (corners == null || corners.length != 4) {
       return false;
@@ -769,13 +740,16 @@ class SegmentationService {
   }
 }
 
+/// 마스크 결과와 확신도를 담는 내부 클래스
 class _MaskResult {
   const _MaskResult(this.mask, this.confidence);
 
-  final List<int> mask;
-  final double confidence;
+  final List<int> mask; // 이진 마스크
+  final double confidence; // 확신도
+
 }
 
+/// 폴리라인을 부드럽게 만들기 (이동 평균)
 List<IntPoint> _smoothPolyline(List<IntPoint> points) {
   if (points.length <= 2) {
     return points;
@@ -792,10 +766,11 @@ List<IntPoint> _smoothPolyline(List<IntPoint> points) {
   return smoothed;
 }
 
-/// Perspective transform utility
+/// 원근 변환 유틸리티
+/// 4개의 꼭지점 좌표를 기반으로 이미지를 변형
 class PerspectiveTransform {
-  /// Apply perspective transform to warp an image based on 4 corner points
-  /// Uses bilinear interpolation for mapping
+  /// 4개의 코너를 기반으로 원근 변환 적용
+  /// 쌍선형 보간을 사용하여 매핑
   static img.Image? warpPerspective(
     img.Image source,
     List<Corner> corners, {

@@ -39,6 +39,7 @@ class SegmentationResult {
     required this.segmentAreaRatio,
     required this.isParallel,
     this.corners,
+    this.polygon,
   });
 
   final Uint8List overlayBytes;
@@ -53,7 +54,8 @@ class SegmentationResult {
   final bool accelerated;
   final double segmentAreaRatio; // 0-1, segment가 차지하는 비율
   final bool isParallel; // 외곽선이 평행한지 여부
-  final List<Corner>? corners;
+  final List<Corner>? corners; // 4점 사각형 근사
+  final List<Corner>? polygon; // 원래 다각형 (convex hull)
 }
 
 class SegmentationService {
@@ -134,7 +136,9 @@ class SegmentationService {
 
     final postprocessStart = DateTime.now();
     final maskResult = _maskFromLogits(logits, _inputSize, _inputSize);
-    final rawCorners = _findCorners(maskResult.mask, _inputSize, _inputSize);
+    final points = _extractSignificantPoints(maskResult.mask, _inputSize, _inputSize);
+    final hull = points != null && points.isNotEmpty ? _convexHull(points) : null;
+    final rawCorners = hull != null ? _approximateToQuadrilateral(hull) : null;
     final maskImage = _maskToImage(maskResult.mask, _inputSize, _inputSize);
     final resizedMask = img.copyResize(
       maskImage,
@@ -142,10 +146,20 @@ class SegmentationService {
       height: originalImage.height,
       interpolation: img.Interpolation.nearest,
     );
-    final overlay = _overlayMask(originalImage, resizedMask, rawCorners);
+    final overlay = _overlayMask(originalImage, resizedMask, hull, rawCorners);
+
+    // Scale both polygon and corners
+    final scaleX = originalImage.width / _inputSize;
+    final scaleY = originalImage.height / _inputSize;
+
+    final scaledPolygon = hull?.map((point) {
+      return Corner(
+        point.x.toDouble(),
+        point.y.toDouble(),
+      ).scale(scaleX.toDouble(), scaleY.toDouble());
+    }).toList();
+
     final scaledCorners = rawCorners?.map((point) {
-      final scaleX = originalImage.width / _inputSize;
-      final scaleY = originalImage.height / _inputSize;
       return Corner(
         point.x.toDouble(),
         point.y.toDouble(),
@@ -179,6 +193,7 @@ class SegmentationService {
       segmentAreaRatio: segmentAreaRatio,
       isParallel: isParallel,
       corners: scaledCorners,
+      polygon: scaledPolygon,
     );
   }
 
@@ -303,6 +318,7 @@ class SegmentationService {
   img.Image _overlayMask(
     img.Image original,
     img.Image mask,
+    List<IntPoint>? polygon,
     List<IntPoint>? corners,
   ) {
     final overlay = img.Image.from(original);
@@ -326,10 +342,12 @@ class SegmentationService {
       }
     }
 
-    if (corners != null && corners.length >= 3) {
-      final scaleX = original.width / _inputSize;
-      final scaleY = original.height / _inputSize;
-      final scaled = corners.map((point) {
+    final scaleX = original.width / _inputSize;
+    final scaleY = original.height / _inputSize;
+
+    // Draw polygon (convex hull) with weak/transparent line
+    if (polygon != null && polygon.length >= 3) {
+      final scaled = polygon.map((point) {
         final x = (point.x * scaleX).round();
         final y = (point.y * scaleY).round();
         return IntPoint(x, y);
@@ -344,8 +362,30 @@ class SegmentationService {
           y1: start.y,
           x2: end.x,
           y2: end.y,
-          color: img.ColorRgba8(255, 0, 0, 255),
-          thickness: 3,
+          color: img.ColorRgba8(255, 255, 0, 128), // Yellow, semi-transparent
+          thickness: 2,
+        );
+      }
+    }
+
+    // Draw 4-point quadrilateral with strong line
+    if (corners != null && corners.length == 4) {
+      final scaled = corners.map((point) {
+        final x = (point.x * scaleX).round();
+        final y = (point.y * scaleY).round();
+        return IntPoint(x, y);
+      }).toList();
+      for (var i = 0; i < scaled.length; i++) {
+        final start = scaled[i];
+        final end = scaled[(i + 1) % scaled.length];
+        img.drawLine(
+          overlay,
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y,
+          color: img.ColorRgba8(0, 255, 0, 255), // Green, fully opaque
+          thickness: 4,
         );
       }
     }
@@ -379,13 +419,189 @@ class SegmentationService {
     return false;
   }
 
-  List<IntPoint>? _findCorners(List<int> mask, int width, int height) {
-    final points = _extractSignificantPoints(mask, width, height);
-    if (points == null || points.isEmpty) {
+  /// Approximates a polygon to a 4-point quadrilateral using Douglas-Peucker algorithm
+  List<IntPoint>? _approximateToQuadrilateral(List<IntPoint> polygon) {
+    if (polygon.length < 3) {
       return null;
     }
-    final hull = _convexHull(points);
-    return hull;
+    if (polygon.length == 4) {
+      return polygon;
+    }
+
+    // Use iterative Douglas-Peucker to reduce to 4 points
+    var simplified = polygon;
+    var epsilon = 1.0;
+    const maxEpsilon = 100.0;
+    const step = 0.5;
+
+    while (simplified.length > 4 && epsilon < maxEpsilon) {
+      simplified = _douglasPeucker(polygon, epsilon);
+      epsilon += step;
+    }
+
+    // If we still have more than 4 points, select the 4 most significant ones
+    if (simplified.length > 4) {
+      simplified = _selectFourCorners(simplified);
+    }
+
+    // If we have less than 4 points, return null
+    if (simplified.length < 4) {
+      return null;
+    }
+
+    // Order corners: top-left, top-right, bottom-right, bottom-left
+    return _orderCorners(simplified);
+  }
+
+  /// Douglas-Peucker polygon simplification algorithm
+  List<IntPoint> _douglasPeucker(List<IntPoint> points, double epsilon) {
+    if (points.length < 3) {
+      return points;
+    }
+
+    // Find the point with maximum distance from line segment
+    var maxDist = 0.0;
+    var maxIndex = 0;
+    final start = points.first;
+    final end = points.last;
+
+    for (var i = 1; i < points.length - 1; i++) {
+      final dist = _perpendicularDistance(points[i], start, end);
+      if (dist > maxDist) {
+        maxDist = dist;
+        maxIndex = i;
+      }
+    }
+
+    // If max distance is greater than epsilon, recursively simplify
+    if (maxDist > epsilon) {
+      final left = _douglasPeucker(points.sublist(0, maxIndex + 1), epsilon);
+      final right = _douglasPeucker(points.sublist(maxIndex), epsilon);
+      return [...left.sublist(0, left.length - 1), ...right];
+    } else {
+      return [start, end];
+    }
+  }
+
+  /// Calculate perpendicular distance from point to line segment
+  double _perpendicularDistance(IntPoint point, IntPoint lineStart, IntPoint lineEnd) {
+    final dx = lineEnd.x - lineStart.x;
+    final dy = lineEnd.y - lineStart.y;
+    final norm = math.sqrt(dx * dx + dy * dy);
+
+    if (norm == 0) {
+      final pdx = point.x - lineStart.x;
+      final pdy = point.y - lineStart.y;
+      return math.sqrt(pdx * pdx + pdy * pdy);
+    }
+
+    return ((point.y - lineStart.y) * dx - (point.x - lineStart.x) * dy).abs() / norm;
+  }
+
+  /// Select 4 corners from a polygon by finding the most distant points
+  List<IntPoint> _selectFourCorners(List<IntPoint> points) {
+    if (points.length <= 4) {
+      return points;
+    }
+
+    // Find centroid
+    var cx = 0.0;
+    var cy = 0.0;
+    for (final point in points) {
+      cx += point.x;
+      cy += point.y;
+    }
+    cx /= points.length;
+    cy /= points.length;
+
+    // Find 4 extreme points (top-left, top-right, bottom-right, bottom-left)
+    IntPoint? topLeft, topRight, bottomRight, bottomLeft;
+    var maxTL = double.negativeInfinity;
+    var maxTR = double.negativeInfinity;
+    var maxBR = double.negativeInfinity;
+    var maxBL = double.negativeInfinity;
+
+    for (final point in points) {
+      final dx = point.x - cx;
+      final dy = point.y - cy;
+
+      // Top-left: minimize x + y
+      final scoreTL = -(dx + dy);
+      if (scoreTL > maxTL) {
+        maxTL = scoreTL;
+        topLeft = point;
+      }
+
+      // Top-right: maximize x - y
+      final scoreTR = dx - dy;
+      if (scoreTR > maxTR) {
+        maxTR = scoreTR;
+        topRight = point;
+      }
+
+      // Bottom-right: maximize x + y
+      final scoreBR = dx + dy;
+      if (scoreBR > maxBR) {
+        maxBR = scoreBR;
+        bottomRight = point;
+      }
+
+      // Bottom-left: minimize x - y
+      final scoreBL = -(dx - dy);
+      if (scoreBL > maxBL) {
+        maxBL = scoreBL;
+        bottomLeft = point;
+      }
+    }
+
+    return [
+      topLeft ?? points[0],
+      topRight ?? points[1],
+      bottomRight ?? points[2],
+      bottomLeft ?? points[3],
+    ];
+  }
+
+  /// Order corners in clockwise order starting from top-left
+  List<IntPoint> _orderCorners(List<IntPoint> corners) {
+    if (corners.length != 4) {
+      return corners;
+    }
+
+    // Find centroid
+    var cx = 0.0;
+    var cy = 0.0;
+    for (final corner in corners) {
+      cx += corner.x;
+      cy += corner.y;
+    }
+    cx /= 4;
+    cy /= 4;
+
+    // Sort by angle from centroid
+    final sorted = List<IntPoint>.from(corners);
+    sorted.sort((a, b) {
+      final angleA = math.atan2(a.y - cy, a.x - cx);
+      final angleB = math.atan2(b.y - cy, b.x - cx);
+      return angleA.compareTo(angleB);
+    });
+
+    // Find top-left corner (minimum y, then minimum x)
+    var topLeftIndex = 0;
+    for (var i = 1; i < 4; i++) {
+      if (sorted[i].y < sorted[topLeftIndex].y ||
+          (sorted[i].y == sorted[topLeftIndex].y && sorted[i].x < sorted[topLeftIndex].x)) {
+        topLeftIndex = i;
+      }
+    }
+
+    // Rotate to start from top-left
+    return [
+      sorted[(topLeftIndex) % 4],
+      sorted[(topLeftIndex + 1) % 4],
+      sorted[(topLeftIndex + 2) % 4],
+      sorted[(topLeftIndex + 3) % 4],
+    ];
   }
 
   List<IntPoint>? _extractSignificantPoints(
@@ -560,4 +776,176 @@ List<IntPoint> _smoothPolyline(List<IntPoint> points) {
     smoothed.add(IntPoint(avgX, avgY));
   }
   return smoothed;
+}
+
+/// Perspective transform utility
+class PerspectiveTransform {
+  /// Apply perspective transform to warp an image based on 4 corner points
+  /// Uses bilinear interpolation for mapping
+  static img.Image? warpPerspective(
+    img.Image source,
+    List<Corner> corners, {
+    int? outputWidth,
+    int? outputHeight,
+  }) {
+    if (corners.length != 4) {
+      return null;
+    }
+
+    // Order corners: top-left, top-right, bottom-right, bottom-left
+    final ordered = _orderCornersForTransform(corners);
+
+    // Calculate output dimensions if not provided
+    final width = outputWidth ?? _calculateOutputWidth(ordered);
+    final height = outputHeight ?? _calculateOutputHeight(ordered);
+
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+
+    // Create output image
+    final output = img.Image(width: width, height: height);
+
+    // Use bilinear mapping from destination to source
+    // Each point in destination maps to corresponding point in source quadrilateral
+    for (var dstY = 0; dstY < height; dstY++) {
+      for (var dstX = 0; dstX < width; dstX++) {
+        // Normalize coordinates to [0, 1]
+        final u = dstX / width;
+        final v = dstY / height;
+
+        // Bilinear interpolation in source quadrilateral
+        final srcX = _bilinearInterpolate(
+          ordered[0].x, // top-left
+          ordered[1].x, // top-right
+          ordered[2].x, // bottom-right
+          ordered[3].x, // bottom-left
+          u,
+          v,
+        );
+
+        final srcY = _bilinearInterpolate(
+          ordered[0].y, // top-left
+          ordered[1].y, // top-right
+          ordered[2].y, // bottom-right
+          ordered[3].y, // bottom-left
+          u,
+          v,
+        );
+
+        // Get pixel from source image with bilinear interpolation
+        final pixel = _getPixelBilinear(source, srcX, srcY);
+        if (pixel != null) {
+          output.setPixel(dstX, dstY, pixel);
+        }
+      }
+    }
+
+    return output;
+  }
+
+  /// Bilinear interpolation for quadrilateral mapping
+  /// tl, tr, br, bl are values at top-left, top-right, bottom-right, bottom-left
+  /// u, v are normalized coordinates in [0, 1]
+  static double _bilinearInterpolate(
+    double tl,
+    double tr,
+    double br,
+    double bl,
+    double u,
+    double v,
+  ) {
+    final top = tl * (1 - u) + tr * u;
+    final bottom = bl * (1 - u) + br * u;
+    return top * (1 - v) + bottom * v;
+  }
+
+  /// Get pixel value with bilinear interpolation
+  static img.Pixel? _getPixelBilinear(img.Image image, double x, double y) {
+    if (x < 0 || y < 0 || x >= image.width - 1 || y >= image.height - 1) {
+      // Handle edge cases
+      final ix = x.round().clamp(0, image.width - 1);
+      final iy = y.round().clamp(0, image.height - 1);
+      return image.getPixel(ix, iy);
+    }
+
+    final x0 = x.floor();
+    final y0 = y.floor();
+    final x1 = x0 + 1;
+    final y1 = y0 + 1;
+
+    final fx = x - x0;
+    final fy = y - y0;
+
+    final p00 = image.getPixel(x0, y0);
+    final p10 = image.getPixel(x1, y0);
+    final p01 = image.getPixel(x0, y1);
+    final p11 = image.getPixel(x1, y1);
+
+    final r = ((1 - fx) * (1 - fy) * p00.r +
+            fx * (1 - fy) * p10.r +
+            (1 - fx) * fy * p01.r +
+            fx * fy * p11.r)
+        .round();
+
+    final g = ((1 - fx) * (1 - fy) * p00.g +
+            fx * (1 - fy) * p10.g +
+            (1 - fx) * fy * p01.g +
+            fx * fy * p11.g)
+        .round();
+
+    final b = ((1 - fx) * (1 - fy) * p00.b +
+            fx * (1 - fy) * p10.b +
+            (1 - fx) * fy * p01.b +
+            fx * fy * p11.b)
+        .round();
+
+    return img.ColorRgb8(r, g, b);
+  }
+
+  static List<Corner> _orderCornersForTransform(List<Corner> corners) {
+    // Find centroid
+    var cx = 0.0;
+    var cy = 0.0;
+    for (final corner in corners) {
+      cx += corner.x;
+      cy += corner.y;
+    }
+    cx /= 4;
+    cy /= 4;
+
+    // Classify corners
+    Corner? topLeft, topRight, bottomRight, bottomLeft;
+
+    for (final corner in corners) {
+      if (corner.x < cx && corner.y < cy) {
+        topLeft = corner;
+      } else if (corner.x >= cx && corner.y < cy) {
+        topRight = corner;
+      } else if (corner.x >= cx && corner.y >= cy) {
+        bottomRight = corner;
+      } else {
+        bottomLeft = corner;
+      }
+    }
+
+    return [
+      topLeft ?? corners[0],
+      topRight ?? corners[1],
+      bottomRight ?? corners[2],
+      bottomLeft ?? corners[3],
+    ];
+  }
+
+  static int _calculateOutputWidth(List<Corner> corners) {
+    final topWidth = (corners[1].x - corners[0].x).abs();
+    final bottomWidth = (corners[2].x - corners[3].x).abs();
+    return math.max(topWidth, bottomWidth).round();
+  }
+
+  static int _calculateOutputHeight(List<Corner> corners) {
+    final leftHeight = (corners[3].y - corners[0].y).abs();
+    final rightHeight = (corners[2].y - corners[1].y).abs();
+    return math.max(leftHeight, rightHeight).round();
+  }
 }

@@ -51,7 +51,6 @@ class _ScannerScreenState extends State<ScannerScreen>
   bool _isStreaming = false;
   DateTime _lastSegmentation = DateTime.fromMillisecondsSinceEpoch(0);
   final Duration _segmentationInterval = const Duration(milliseconds: 350);
-  List<Offset>? _outlineSegments;
   late final AnimationController _cornerController;
   List<Offset>? _startCorners;
   List<Offset>? _targetCorners;
@@ -158,7 +157,6 @@ class _ScannerScreenState extends State<ScannerScreen>
     setState(() {
       _latestResult = result;
       _error = null;
-      _outlineSegments = _buildOutlineSegments(result);
     });
     _updateCorners(result);
   }
@@ -300,13 +298,14 @@ class _ScannerScreenState extends State<ScannerScreen>
                               filterQuality: FilterQuality.low,
                             ),
                           ),
-                          if (_outlineSegments != null)
-                            CustomPaint(
-                              painter: _OutlinePainter(
-                                segments: _outlineSegments!,
-                                color: Colors.redAccent,
-                              ),
+                          CustomPaint(
+                            painter: _OutlinePainter(
+                              polygon: _latestResult!.polygon,
+                              corners: _latestResult!.corners,
+                              maskWidth: _latestResult!.maskWidth.toDouble(),
+                              maskHeight: _latestResult!.maskHeight.toDouble(),
                             ),
+                          ),
                         ],
                       ),
                     ),
@@ -546,35 +545,40 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   img.Image _cropImageWithPerspective(img.Image source, List<Corner> corners) {
-    // For simplicity, we'll use a bounding box approach
-    // In a production app, you'd use perspective transform
-    final minX = corners
-        .map((c) => c.x)
-        .reduce((a, b) => a < b ? a : b)
-        .toInt();
-    final minY = corners
-        .map((c) => c.y)
-        .reduce((a, b) => a < b ? a : b)
-        .toInt();
-    final maxX = corners
-        .map((c) => c.x)
-        .reduce((a, b) => a > b ? a : b)
-        .toInt();
-    final maxY = corners
-        .map((c) => c.y)
-        .reduce((a, b) => a > b ? a : b)
-        .toInt();
+    if (corners.length != 4) {
+      // Fallback to bounding box if not 4 corners
+      final minX = corners
+          .map((c) => c.x)
+          .reduce((a, b) => a < b ? a : b)
+          .toInt();
+      final minY = corners
+          .map((c) => c.y)
+          .reduce((a, b) => a < b ? a : b)
+          .toInt();
+      final maxX = corners
+          .map((c) => c.x)
+          .reduce((a, b) => a > b ? a : b)
+          .toInt();
+      final maxY = corners
+          .map((c) => c.y)
+          .reduce((a, b) => a > b ? a : b)
+          .toInt();
 
-    final width = (maxX - minX).clamp(1, source.width - minX);
-    final height = (maxY - minY).clamp(1, source.height - minY);
+      final width = (maxX - minX).clamp(1, source.width - minX);
+      final height = (maxY - minY).clamp(1, source.height - minY);
 
-    return img.copyCrop(
-      source,
-      x: minX.clamp(0, source.width - 1),
-      y: minY.clamp(0, source.height - 1),
-      width: width,
-      height: height,
-    );
+      return img.copyCrop(
+        source,
+        x: minX.clamp(0, source.width - 1),
+        y: minY.clamp(0, source.height - 1),
+        width: width,
+        height: height,
+      );
+    }
+
+    // Use perspective transform for 4 corners
+    final warped = PerspectiveTransform.warpPerspective(source, corners);
+    return warped ?? source;
   }
 
   Future<void> _saveImage(img.Image image, String folderName) async {
@@ -686,71 +690,6 @@ class _ScannerScreenState extends State<ScannerScreen>
     return interpolated;
   }
 
-  List<Offset>? _resampleCorners(
-    List<Corner> corners,
-    int width,
-    int height, {
-    int sampleCount = 32,
-  }) {
-    if (corners.length < 3 || width == 0 || height == 0) {
-      return null;
-    }
-    final normalized = corners
-        .map((corner) => Offset(corner.x / width, corner.y / height))
-        .toList();
-    final closed = [...normalized, normalized.first];
-    final lengths = <double>[];
-    double total = 0;
-    for (var i = 0; i < closed.length - 1; i++) {
-      final segmentLength = (closed[i + 1] - closed[i]).distance;
-      lengths.add(segmentLength);
-      total += segmentLength;
-    }
-    if (total == 0) {
-      return null;
-    }
-    final step = total / sampleCount;
-    final result = <Offset>[];
-    double targetDist = 0;
-    int segmentIndex = 0;
-    double accumulated = lengths.isNotEmpty ? lengths[0] : 0;
-    for (var i = 0; i < sampleCount; i++) {
-      while (targetDist > accumulated && segmentIndex < lengths.length - 1) {
-        segmentIndex++;
-        accumulated += lengths[segmentIndex];
-      }
-      final segmentStart = closed[segmentIndex];
-      final segmentEnd = closed[segmentIndex + 1];
-      final prevAccumulated = accumulated - lengths[segmentIndex];
-      final localT = lengths[segmentIndex] == 0
-          ? 0
-          : (targetDist - prevAccumulated) / lengths[segmentIndex];
-      final point = Offset(
-        ui.lerpDouble(segmentStart.dx, segmentEnd.dx, localT.toDouble()) ??
-            segmentStart.dx,
-        ui.lerpDouble(segmentStart.dy, segmentEnd.dy, localT.toDouble()) ??
-            segmentStart.dy,
-      );
-      result.add(point);
-      targetDist += step;
-    }
-    return result;
-  }
-
-  List<Offset>? _buildOutlineSegments(SegmentationResult result) {
-    final corners = result.corners;
-    if (corners == null || corners.length < 3) {
-      return null;
-    }
-    final normals = corners
-        .map(
-          (corner) =>
-              Offset(corner.x / result.maskWidth, corner.y / result.maskHeight),
-        )
-        .toList();
-    return normals;
-  }
-
   img.Image _applyOrientation(img.Image image) {
     final controller = _cameraController;
     if (controller == null) {
@@ -793,39 +732,82 @@ class _ErrorState extends StatelessWidget {
 }
 
 class _OutlinePainter extends CustomPainter {
-  const _OutlinePainter({required this.segments, this.color});
+  const _OutlinePainter({
+    this.polygon,
+    this.corners,
+    required this.maskWidth,
+    required this.maskHeight,
+  });
 
-  final List<Offset> segments;
-  final Color? color;
+  final List<Corner>? polygon;
+  final List<Corner>? corners;
+  final double maskWidth;
+  final double maskHeight;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (segments.length < 3) {
-      return;
-    }
-    final paint = Paint()
-      ..color = color ?? Colors.redAccent
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
+    // Draw polygon (weak, yellow, semi-transparent)
+    if (polygon != null && polygon!.length >= 3) {
+      final polygonPaint = Paint()
+        ..color = Colors.yellow.withOpacity(0.5)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
 
-    final path = Path();
-    for (var i = 0; i < segments.length; i++) {
-      final point = segments[i];
-      final dx = point.dx * size.width;
-      final dy = point.dy * size.height;
-      if (i == 0) {
-        path.moveTo(dx, dy);
-      } else {
-        path.lineTo(dx, dy);
+      final polygonPath = Path();
+      for (var i = 0; i < polygon!.length; i++) {
+        final point = polygon![i];
+        final dx = (point.x / maskWidth) * size.width;
+        final dy = (point.y / maskHeight) * size.height;
+        if (i == 0) {
+          polygonPath.moveTo(dx, dy);
+        } else {
+          polygonPath.lineTo(dx, dy);
+        }
+      }
+      polygonPath.close();
+      canvas.drawPath(polygonPath, polygonPaint);
+    }
+
+    // Draw 4-point quadrilateral (strong, green, fully opaque)
+    if (corners != null && corners!.length == 4) {
+      final cornersPaint = Paint()
+        ..color = Colors.greenAccent
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4;
+
+      final cornersPath = Path();
+      for (var i = 0; i < corners!.length; i++) {
+        final point = corners![i];
+        final dx = (point.x / maskWidth) * size.width;
+        final dy = (point.y / maskHeight) * size.height;
+        if (i == 0) {
+          cornersPath.moveTo(dx, dy);
+        } else {
+          cornersPath.lineTo(dx, dy);
+        }
+      }
+      cornersPath.close();
+      canvas.drawPath(cornersPath, cornersPaint);
+
+      // Draw corner points
+      final pointPaint = Paint()
+        ..color = Colors.greenAccent
+        ..style = PaintingStyle.fill;
+
+      for (final corner in corners!) {
+        final dx = (corner.x / maskWidth) * size.width;
+        final dy = (corner.y / maskHeight) * size.height;
+        canvas.drawCircle(Offset(dx, dy), 6, pointPaint);
       }
     }
-    path.close();
-    canvas.drawPath(path, paint);
   }
 
   @override
   bool shouldRepaint(covariant _OutlinePainter oldDelegate) {
-    return oldDelegate.segments != segments || oldDelegate.color != color;
+    return oldDelegate.polygon != polygon ||
+        oldDelegate.corners != corners ||
+        oldDelegate.maskWidth != maskWidth ||
+        oldDelegate.maskHeight != maskHeight;
   }
 }
 

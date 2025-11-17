@@ -194,9 +194,9 @@ class _ScannerScreenState extends State<ScannerScreen>
       return '문서 전체를 보이게 해주세요';
     }
 
-    if (cornerCount == 4 && !result.isParallel) {
-      return '카메라를 평행하게 맞춰주세요';
-    }
+    // if (cornerCount == 4 && !result.isParallel) {
+    //   return '카메라를 평행하게 맞춰주세요';
+    // }
 
     return null;
   }
@@ -534,7 +534,10 @@ class _ScannerScreenState extends State<ScannerScreen>
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
-              icon: const Icon(Icons.arrow_drop_down, color: AppTheme.textSecondary),
+              icon: const Icon(
+                Icons.arrow_drop_down,
+                color: AppTheme.textSecondary,
+              ),
               items: [
                 ..._folderFileCounts.keys.map((folder) {
                   final count = _folderFileCounts[folder] ?? 0;
@@ -550,7 +553,11 @@ class _ScannerScreenState extends State<ScannerScreen>
                   value: '__manage__',
                   child: Row(
                     children: [
-                      Icon(Icons.settings, size: 16, color: AppTheme.primaryColor),
+                      Icon(
+                        Icons.settings,
+                        size: 16,
+                        color: AppTheme.primaryColor,
+                      ),
                       SizedBox(width: 8),
                       Text('폴더 관리...'),
                     ],
@@ -646,7 +653,9 @@ class _ScannerScreenState extends State<ScannerScreen>
             Text(
               label,
               style: TextStyle(
-                color: isActive ? AppTheme.primaryColor : AppTheme.textSecondary,
+                color: isActive
+                    ? AppTheme.primaryColor
+                    : AppTheme.textSecondary,
                 fontSize: 11,
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
               ),
@@ -711,10 +720,7 @@ class _ScannerScreenState extends State<ScannerScreen>
               top: 4,
               right: 4,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 decoration: BoxDecoration(
                   gradient: AppTheme.primaryGradient,
                   borderRadius: BorderRadius.circular(8),

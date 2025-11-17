@@ -8,29 +8,34 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+import 'screens/folder_manager_screen.dart';
+import 'screens/image_detail_screen.dart';
 import 'services/segmentation_service.dart';
+import 'theme/app_theme.dart';
 
+/// 앱 진입점
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MlScannerApp());
 }
 
+/// 메인 앱 위젯
 class MlScannerApp extends StatelessWidget {
   const MlScannerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ML Scanner',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
-      ),
+      title: 'Document Scanner',
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      debugShowCheckedModeBanner: false,
       home: const ScannerScreen(),
     );
   }
 }
 
+/// 스캐너 메인 화면
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
 
@@ -55,11 +60,13 @@ class _ScannerScreenState extends State<ScannerScreen>
   List<Offset>? _startCorners;
   List<Offset>? _targetCorners;
 
-  // New state variables
-  bool _isFlashOn = false;
-  bool _isTwoPageMode = false;
-  String _selectedFolder = '기본';
-  final List<String> _folders = ['기본'];
+  // UI 상태 변수
+  bool _isFlashOn = false; // 플래시 상태
+  bool _isTwoPageMode = false; // 2페이지 스캔 모드
+  String _selectedFolder = '기본'; // 선택된 폴더
+  final Map<String, int> _folderFileCounts = {}; // 폴더별 파일 개수
+  String? _lastCapturedImagePath; // 마지막 캡처된 이미지 경로
+  int _lastCapturedFolderFileCount = 0; // 마지막 캡처된 폴더의 파일 개수
 
   @override
   void initState() {
@@ -84,6 +91,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     super.dispose();
   }
 
+  /// 카메라 및 세그멘테이션 서비스 초기화
   Future<void> _initialize() async {
     final cameras = await availableCameras();
     if (cameras.isEmpty) {
@@ -102,6 +110,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     await _segmentationService.initialize();
   }
 
+  /// 카메라 이미지 스트림 시작
   Future<void> _startImageStream() async {
     final controller = _cameraController;
     if (controller == null ||
@@ -119,6 +128,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     _isStreaming = true;
   }
 
+  /// 카메라 이미지 스트림 중지
   Future<void> _stopImageStream() async {
     final controller = _cameraController;
     if (controller == null || !_isStreaming) {
@@ -128,6 +138,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     _isStreaming = false;
   }
 
+  /// 카메라 이미지 처리 및 세그멘테이션 수행
   Future<void> _processCameraImage(CameraImage image) async {
     if (_isProcessing) {
       return;
@@ -153,6 +164,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
+  /// 세그멘테이션 결과 업데이트
   void _updateResult(SegmentationResult result) {
     setState(() {
       _latestResult = result;
@@ -161,14 +173,16 @@ class _ScannerScreenState extends State<ScannerScreen>
     _updateCorners(result);
   }
 
+  /// 유효성 검증 메시지 반환
+  /// 확신도, 영역 비율, 코너 개수, 평행 여부 등을 체크
   String? _getValidationMessage(SegmentationResult? result) {
     if (result == null) {
       return null;
     }
 
-    // Priority order for validation messages
-    if (result.confidence < 0.7) {
-      return '문서나 책을 준비해 주세요';
+    // 확신도 85% 미만일 때
+    if (result.confidence < 0.85) {
+      return '문서를 찾을 수 없습니다';
     }
 
     if (result.segmentAreaRatio < 0.1) {
@@ -187,6 +201,16 @@ class _ScannerScreenState extends State<ScannerScreen>
     return null;
   }
 
+  /// 캡처 가능 여부 확인
+  /// 확신도 85% 이상이고 유효성 검사를 통과해야 함
+  bool _canCapture() {
+    final result = _latestResult;
+    if (result == null) return false;
+
+    // 확신도 85% 이상이고 유효성 메시지가 없을 때 캡처 가능
+    return result.confidence >= 0.85 && _getValidationMessage(result) == null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -202,35 +226,59 @@ class _ScannerScreenState extends State<ScannerScreen>
           return SafeArea(
             child: Stack(
               children: [
-                // Full screen camera preview
+                // 전체 화면 카메라 프리뷰
                 Positioned.fill(child: _buildCameraPreview()),
-                // Validation message overlay (center)
+                // 유효성 검증 메시지 오버레이 (중앙)
                 if (_getValidationMessage(_latestResult) != null)
                   Center(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 16,
-                      ),
+                      padding: const EdgeInsets.all(20),
                       margin: const EdgeInsets.symmetric(horizontal: 32),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        _getValidationMessage(_latestResult)!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.warningColor.withOpacity(0.95),
+                            AppTheme.warningColor.withOpacity(0.9),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                        textAlign: TextAlign.center,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.warningColor.withOpacity(0.4),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.info_outline,
+                            color: AppTheme.textPrimary,
+                            size: 28,
+                          ),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Text(
+                              _getValidationMessage(_latestResult)!,
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                // Info overlay (top right, small)
+                // 정보 오버레이 (우측 상단, 작게)
                 Positioned(top: 8, right: 8, child: _buildInfoOverlay()),
-                // Bottom control panel
+                // 하단 컨트롤 패널
                 Positioned(
                   bottom: 0,
                   left: 0,
@@ -245,6 +293,8 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
+  /// 카메라 프리뷰 위젯 빌드
+  /// 문서 외곽선 오버레이 포함
   Widget _buildCameraPreview() {
     final controller = _cameraController;
     if (controller == null || !controller.value.isInitialized) {
@@ -286,27 +336,14 @@ class _ScannerScreenState extends State<ScannerScreen>
                     child: SizedBox(
                       width: _latestResult!.maskWidth.toDouble(),
                       height: _latestResult!.maskHeight.toDouble(),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Opacity(
-                            opacity: 0.3,
-                            child: Image.memory(
-                              _latestResult!.maskBytes,
-                              fit: BoxFit.fill,
-                              gaplessPlayback: true,
-                              filterQuality: FilterQuality.low,
-                            ),
-                          ),
-                          CustomPaint(
-                            painter: _OutlinePainter(
-                              polygon: _latestResult!.polygon,
-                              corners: _latestResult!.corners,
-                              maskWidth: _latestResult!.maskWidth.toDouble(),
-                              maskHeight: _latestResult!.maskHeight.toDouble(),
-                            ),
-                          ),
-                        ],
+                      child: CustomPaint(
+                        painter: _OutlinePainter(
+                          polygon: _latestResult!.polygon,
+                          corners: _latestResult!.corners,
+                          maskWidth: _latestResult!.maskWidth.toDouble(),
+                          maskHeight: _latestResult!.maskHeight.toDouble(),
+                          confidence: _latestResult!.confidence,
+                        ),
                       ),
                     ),
                   ),
@@ -318,158 +355,146 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
+  /// 정보 오버레이 빌드 (확신도, 처리 시간)
   Widget _buildInfoOverlay() {
     final result = _latestResult;
     if (result == null) {
       return const SizedBox.shrink();
     }
 
+    final isHighConfidence = result.confidence >= 0.85;
+
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.6),
-        borderRadius: BorderRadius.circular(8),
+        gradient: isHighConfidence
+            ? LinearGradient(
+                colors: [
+                  AppTheme.successColor.withOpacity(0.9),
+                  AppTheme.successColor.withOpacity(0.8),
+                ],
+              )
+            : LinearGradient(
+                colors: [
+                  Colors.black.withOpacity(0.7),
+                  Colors.black.withOpacity(0.6),
+                ],
+              ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(
-            '${(result.confidence * 100).toStringAsFixed(0)}%',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isHighConfidence ? Icons.check_circle : Icons.info,
+                color: Colors.white,
+                size: 14,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '${(result.confidence * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 2),
           Text(
             '${result.totalTime.inMilliseconds}ms',
-            style: const TextStyle(color: Colors.white70, fontSize: 10),
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 10,
+            ),
           ),
         ],
       ),
     );
   }
 
+  /// 하단 컨트롤 패널 빌드
   Widget _buildControlPanel() {
+    final canCapture = _canCapture();
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 32),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.8),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Top icon buttons
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildIconButton(
-                icon: _isTwoPageMode ? Icons.book : Icons.description,
-                label: _isTwoPageMode ? '2페이지' : '1페이지',
-                onPressed: () {
-                  setState(() {
-                    _isTwoPageMode = !_isTwoPageMode;
-                  });
-                },
-              ),
-              _buildIconButton(
-                icon: _isFlashOn ? Icons.flash_on : Icons.flash_off,
-                label: '플래시',
-                onPressed: _toggleFlash,
-              ),
-              _buildIconButton(
-                icon: Icons.settings,
-                label: '설정',
-                onPressed: () {
-                  // TODO: Open settings
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Middle row: Capture button and folder selector
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Folder selector
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: DropdownButton<String>(
-                  value: _selectedFolder,
-                  dropdownColor: Colors.grey.shade800,
-                  underline: const SizedBox.shrink(),
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  items: _folders.map((folder) {
-                    return DropdownMenuItem(value: folder, child: Text(folder));
-                  }).toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _selectedFolder = value;
-                      });
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(width: 16),
-              // Capture button
-              GestureDetector(
-                onTap: _captureImage,
-                child: Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                    border: Border.all(color: Colors.teal, width: 4),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.teal.withOpacity(0.5),
-                        blurRadius: 10,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.camera_alt, color: Colors.teal, size: 32),
-                  ),
-                ),
-              ),
-            ],
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildIconButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onPressed,
-  }) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
+      child: SafeArea(
+        top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 28),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            // 상단 메뉴 바
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildMenuButton(
+                    icon: _isTwoPageMode ? Icons.menu_book : Icons.description,
+                    label: _isTwoPageMode ? '2페이지' : '1페이지',
+                    isActive: _isTwoPageMode,
+                    onPressed: () {
+                      setState(() {
+                        _isTwoPageMode = !_isTwoPageMode;
+                      });
+                    },
+                  ),
+                  _buildMenuButton(
+                    icon: _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                    label: '플래시',
+                    isActive: _isFlashOn,
+                    onPressed: _toggleFlash,
+                  ),
+                  _buildMenuButton(
+                    icon: Icons.settings,
+                    label: '설정',
+                    isActive: false,
+                    onPressed: () {
+                      // TODO: 설정 화면 열기
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            // 중간 행: 폴더 선택, 캡처 버튼, 썸네일
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // 폴더 선택 버튼
+                Expanded(child: _buildFolderSelector()),
+                const SizedBox(width: 12),
+                // 캡처 버튼 (중앙)
+                _buildCaptureButton(canCapture),
+                const SizedBox(width: 12),
+                // 썸네일 (또는 빈 공간)
+                _buildThumbnail(),
+              ],
             ),
           ],
         ),
@@ -477,6 +502,246 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
+  /// 폴더 선택 드롭다운 빌드
+  Widget _buildFolderSelector() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.folder, color: AppTheme.primaryColor, size: 20),
+          const SizedBox(width: 8),
+          Flexible(
+            child: DropdownButton<String>(
+              value: _selectedFolder,
+              dropdownColor: AppTheme.surfaceColor,
+              underline: const SizedBox.shrink(),
+              isDense: true,
+              style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+              icon: const Icon(Icons.arrow_drop_down, color: AppTheme.textSecondary),
+              items: [
+                ..._folderFileCounts.keys.map((folder) {
+                  final count = _folderFileCounts[folder] ?? 0;
+                  return DropdownMenuItem(
+                    value: folder,
+                    child: Text(
+                      '$folder ($count)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }),
+                const DropdownMenuItem(
+                  value: '__manage__',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings, size: 16, color: AppTheme.primaryColor),
+                      SizedBox(width: 8),
+                      Text('폴더 관리...'),
+                    ],
+                  ),
+                ),
+              ],
+              onChanged: (value) async {
+                if (value == '__manage__') {
+                  // 폴더 관리 화면 열기
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const FolderManagerScreen(),
+                    ),
+                  );
+                  // 돌아왔을 때 폴더 목록 새로고침
+                  await _loadFolders();
+                } else if (value != null) {
+                  setState(() {
+                    _selectedFolder = value;
+                  });
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 캡처 버튼 빌드
+  /// 확신도 85% 이상일 때만 활성화
+  Widget _buildCaptureButton(bool enabled) {
+    return GestureDetector(
+      onTap: enabled ? _captureImage : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: 70,
+        height: 70,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: enabled ? AppTheme.primaryGradient : null,
+          color: enabled ? null : Colors.grey.shade300,
+          boxShadow: enabled
+              ? [
+                  BoxShadow(
+                    color: AppTheme.primaryColor.withOpacity(0.4),
+                    blurRadius: 20,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : [],
+        ),
+        child: Center(
+          child: Icon(
+            Icons.camera_alt_rounded,
+            color: enabled ? Colors.white : Colors.grey.shade400,
+            size: 32,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 메뉴 버튼 빌드
+  Widget _buildMenuButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    required bool isActive,
+  }) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive
+              ? AppTheme.primaryColor.withOpacity(0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isActive ? AppTheme.primaryColor : AppTheme.textSecondary,
+              size: 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive ? AppTheme.primaryColor : AppTheme.textSecondary,
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 썸네일 빌드
+  Widget _buildThumbnail() {
+    if (_lastCapturedImagePath == null) {
+      return Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Icon(Icons.image, color: Colors.grey.shade400, size: 24),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () {
+        // 이미지 상세 화면으로 이동
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ImageDetailScreen(
+              imagePath: _lastCapturedImagePath!,
+              imageTitle: _lastCapturedImagePath!.split('/').last,
+            ),
+          ),
+        );
+      },
+      child: Stack(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              image: DecorationImage(
+                image: FileImage(File(_lastCapturedImagePath!)),
+                fit: BoxFit.cover,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+          ),
+          // 파일 개수 표시
+          if (_lastCapturedFolderFileCount > 0)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryColor.withOpacity(0.3),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  '$_lastCapturedFolderFileCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 플래시 토글
   Future<void> _toggleFlash() async {
     final controller = _cameraController;
     if (controller == null || !controller.value.isInitialized) {
@@ -497,6 +762,8 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
+  /// 이미지 캡처
+  /// 고해상도로 촬영하고 4각형 영역을 잘라내어 저장
   Future<void> _captureImage() async {
     final controller = _cameraController;
     final result = _latestResult;
@@ -513,10 +780,10 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     try {
-      // 1. Stop image stream
+      // 1. 이미지 스트림 중지
       await _stopImageStream();
 
-      // 2. Take picture
+      // 2. 고해상도 사진 촬영
       final xfile = await controller.takePicture();
       final imageBytes = await xfile.readAsBytes();
       final capturedImage = img.decodeImage(imageBytes);
@@ -525,28 +792,37 @@ class _ScannerScreenState extends State<ScannerScreen>
         throw StateError('Failed to decode captured image');
       }
 
-      // 3. Apply orientation
+      // 3. 방향 적용
       final oriented = _applyOrientation(capturedImage);
 
-      // 4. Crop image using corners
+      // 4. 4각형 영역 잘라내기
       final croppedImage = _cropImageWithPerspective(oriented, result.corners!);
 
-      // 5. Save to selected folder
-      await _saveImage(croppedImage, _selectedFolder);
+      // 5. 선택된 폴더에 저장
+      final savedPath = await _saveImage(croppedImage, _selectedFolder);
+
+      // 6. 폴더 파일 개수 업데이트
+      await _loadFolders();
+
+      setState(() {
+        _lastCapturedImagePath = savedPath;
+        _lastCapturedFolderFileCount = _folderFileCounts[_selectedFolder] ?? 0;
+      });
 
       _showSnackBar('이미지가 저장되었습니다.');
 
-      // 6. Resume image stream
+      // 6. 이미지 스트림 재개
       await _startImageStream();
     } catch (e) {
-      _showSnackBar('이미지 캡쳐 실패: $e');
+      _showSnackBar('이미지 캡처 실패: $e');
       await _startImageStream();
     }
   }
 
+  /// 원근 변환을 사용하여 이미지 크롭
   img.Image _cropImageWithPerspective(img.Image source, List<Corner> corners) {
     if (corners.length != 4) {
-      // Fallback to bounding box if not 4 corners
+      // 4개 미만의 코너인 경우 바운딩 박스로 크롭
       final minX = corners
           .map((c) => c.x)
           .reduce((a, b) => a < b ? a : b)
@@ -576,12 +852,14 @@ class _ScannerScreenState extends State<ScannerScreen>
       );
     }
 
-    // Use perspective transform for 4 corners
+    // 4개의 코너로 원근 변환 사용
     final warped = PerspectiveTransform.warpPerspective(source, corners);
     return warped ?? source;
   }
 
-  Future<void> _saveImage(img.Image image, String folderName) async {
+  /// 이미지를 폴더에 저장
+  /// 순차적인 숫자 파일명으로 PNG 저장
+  Future<String> _saveImage(img.Image image, String folderName) async {
     final directory = await getApplicationDocumentsDirectory();
     final folderPath = '${directory.path}/ml_scanner/$folderName';
     final folder = Directory(folderPath);
@@ -590,15 +868,24 @@ class _ScannerScreenState extends State<ScannerScreen>
       await folder.create(recursive: true);
     }
 
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final fileName = 'scan_$timestamp.png';
+    // 폴더 내 파일 개수 확인하여 순차 번호 결정
+    final files = await folder.list().toList();
+    final imageFiles = files.whereType<File>().where((file) {
+      return file.path.endsWith('.png');
+    }).toList();
+
+    final fileNumber = imageFiles.length + 1;
+    final fileName = '$fileNumber.png';
     final filePath = '$folderPath/$fileName';
 
     final pngBytes = img.encodePng(image);
     final file = File(filePath);
     await file.writeAsBytes(pngBytes);
+
+    return filePath;
   }
 
+  /// 스낵바 표시
   void _showSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -606,6 +893,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
+  /// 폴더 목록 로드
   Future<void> _loadFolders() async {
     final directory = await getApplicationDocumentsDirectory();
     final basePath = '${directory.path}/ml_scanner';
@@ -613,35 +901,41 @@ class _ScannerScreenState extends State<ScannerScreen>
 
     if (!await baseDir.exists()) {
       await baseDir.create(recursive: true);
-      // Create default folder
+      // 기본 폴더 생성
       final defaultFolder = Directory('$basePath/기본');
       await defaultFolder.create();
       return;
     }
 
     final entities = await baseDir.list().toList();
-    final folderNames = entities
-        .whereType<Directory>()
-        .map((dir) => dir.path.split('/').last)
-        .toList();
+    final folderData = <String, int>{};
 
-    if (folderNames.isEmpty) {
+    for (final entity in entities.whereType<Directory>()) {
+      final folderName = entity.path.split('/').last;
+      final files = await entity.list().toList();
+      final fileCount = files.whereType<File>().where((file) {
+        return file.path.endsWith('.png') || file.path.endsWith('.pdf');
+      }).length;
+      folderData[folderName] = fileCount;
+    }
+
+    if (folderData.isEmpty) {
       final defaultFolder = Directory('$basePath/기본');
       await defaultFolder.create();
-      folderNames.add('기본');
+      folderData['기본'] = 0;
     }
 
     setState(() {
-      _folders.clear();
-      _folders.addAll(folderNames);
-      if (!_folders.contains(_selectedFolder)) {
-        _selectedFolder = _folders.first;
+      _folderFileCounts.clear();
+      _folderFileCounts.addAll(folderData);
+      if (!_folderFileCounts.containsKey(_selectedFolder)) {
+        _selectedFolder = _folderFileCounts.keys.first;
       }
     });
   }
 
-  /// Updates the target contour and kicks off the morphing animation whenever
-  /// a confident set of corners arrives from the segmentation service.
+  /// 코너 애니메이션 업데이트
+  /// 확신도가 충분히 높을 때만 애니메이션 시작
   void _updateCorners(SegmentationResult result) {
     if (result.corners == null ||
         result.maskWidth == 0 ||
@@ -666,6 +960,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     _cornerController.forward(from: 0);
   }
 
+  /// 애니메이션된 코너 좌표 가져오기
   List<Offset>? get _animatedCorners {
     final target = _targetCorners;
     if (target == null) {
@@ -690,6 +985,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     return interpolated;
   }
 
+  /// 이미지에 센서 방향 적용
   img.Image _applyOrientation(img.Image image) {
     final controller = _cameraController;
     if (controller == null) {
@@ -709,6 +1005,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 }
 
+/// 에러 상태 위젯
 class _ErrorState extends StatelessWidget {
   const _ErrorState({required this.message});
 
@@ -731,49 +1028,33 @@ class _ErrorState extends StatelessWidget {
   }
 }
 
+/// 외곽선 페인터
+/// 확신도에 따라 빨간색/초록색 윤곽선 표시
 class _OutlinePainter extends CustomPainter {
   const _OutlinePainter({
     this.polygon,
     this.corners,
     required this.maskWidth,
     required this.maskHeight,
+    required this.confidence,
   });
 
   final List<Corner>? polygon;
   final List<Corner>? corners;
   final double maskWidth;
   final double maskHeight;
+  final double confidence;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw polygon (weak, yellow, semi-transparent)
-    if (polygon != null && polygon!.length >= 3) {
-      final polygonPaint = Paint()
-        ..color = Colors.yellow.withOpacity(0.5)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2;
-
-      final polygonPath = Path();
-      for (var i = 0; i < polygon!.length; i++) {
-        final point = polygon![i];
-        final dx = (point.x / maskWidth) * size.width;
-        final dy = (point.y / maskHeight) * size.height;
-        if (i == 0) {
-          polygonPath.moveTo(dx, dy);
-        } else {
-          polygonPath.lineTo(dx, dy);
-        }
-      }
-      polygonPath.close();
-      canvas.drawPath(polygonPath, polygonPaint);
-    }
-
-    // Draw 4-point quadrilateral (strong, green, fully opaque)
+    // 4점 사각형 그리기
     if (corners != null && corners!.length == 4) {
+      // 확신도 85% 이상이면 초록색, 미만이면 빨간색
+      final isHighConfidence = confidence >= 0.85;
       final cornersPaint = Paint()
-        ..color = Colors.greenAccent
+        ..color = isHighConfidence ? Colors.greenAccent : Colors.redAccent
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4;
+        ..strokeWidth = 2; // 선 두께 50% 감소 (4 -> 2)
 
       final cornersPath = Path();
       for (var i = 0; i < corners!.length; i++) {
@@ -789,15 +1070,15 @@ class _OutlinePainter extends CustomPainter {
       cornersPath.close();
       canvas.drawPath(cornersPath, cornersPaint);
 
-      // Draw corner points
+      // 코너 포인트 그리기
       final pointPaint = Paint()
-        ..color = Colors.greenAccent
+        ..color = isHighConfidence ? Colors.greenAccent : Colors.redAccent
         ..style = PaintingStyle.fill;
 
       for (final corner in corners!) {
         final dx = (corner.x / maskWidth) * size.width;
         final dy = (corner.y / maskHeight) * size.height;
-        canvas.drawCircle(Offset(dx, dy), 6, pointPaint);
+        canvas.drawCircle(Offset(dx, dy), 4, pointPaint); // 크기도 약간 감소
       }
     }
   }
@@ -807,10 +1088,12 @@ class _OutlinePainter extends CustomPainter {
     return oldDelegate.polygon != polygon ||
         oldDelegate.corners != corners ||
         oldDelegate.maskWidth != maskWidth ||
-        oldDelegate.maskHeight != maskHeight;
+        oldDelegate.maskHeight != maskHeight ||
+        oldDelegate.confidence != confidence;
   }
 }
 
+/// YUV420 이미지를 RGB 이미지로 변환
 img.Image _convertYuv420ToImage(CameraImage image) {
   final width = image.width;
   final height = image.height;

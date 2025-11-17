@@ -83,36 +83,29 @@ class AppTheme {
         fontWeight: FontWeight.bold,
       ),
     ),
-    cardTheme: CardTheme(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: surfaceColor,
-      shadowColor: Colors.black.withOpacity(0.08),
-    ),
+    // cardTheme: CardTheme(
+    //   elevation: 0,
+    //   shape: RoundedRectangleBorder(
+    //     borderRadius: BorderRadius.circular(16),
+    //   ),
+    //   color: surfaceColor,
+    //   shadowColor: Colors.black.withOpacity(0.08),
+    // ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        textStyle: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: primaryColor,
       foregroundColor: Colors.white,
       elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -157,18 +150,9 @@ class AppTheme {
         fontWeight: FontWeight.w600,
         color: textPrimary,
       ),
-      bodyLarge: TextStyle(
-        fontSize: 16,
-        color: textPrimary,
-      ),
-      bodyMedium: TextStyle(
-        fontSize: 14,
-        color: textSecondary,
-      ),
-      bodySmall: TextStyle(
-        fontSize: 12,
-        color: textLight,
-      ),
+      bodyLarge: TextStyle(fontSize: 16, color: textPrimary),
+      bodyMedium: TextStyle(fontSize: 14, color: textSecondary),
+      bodySmall: TextStyle(fontSize: 12, color: textLight),
     ),
   );
 
@@ -196,13 +180,13 @@ class AppTheme {
         fontWeight: FontWeight.bold,
       ),
     ),
-    cardTheme: CardTheme(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      color: darkSurface,
-    ),
+    // cardTheme: CardTheme(
+    //   elevation: 0,
+    //   shape: RoundedRectangleBorder(
+    //     borderRadius: BorderRadius.circular(16),
+    //   ),
+    //   color: darkSurface,
+    // ),
   );
 
   // 버튼 스타일
@@ -237,10 +221,7 @@ class AppTheme {
   }
 
   // 아이콘 컨테이너 스타일
-  static BoxDecoration iconContainer({
-    Gradient? gradient,
-    double size = 56,
-  }) {
+  static BoxDecoration iconContainer({Gradient? gradient, double size = 56}) {
     return BoxDecoration(
       gradient: gradient ?? primaryGradient,
       shape: BoxShape.circle,

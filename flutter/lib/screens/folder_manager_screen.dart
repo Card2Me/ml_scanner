@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../theme/app_theme.dart';
 import '../utils/file_utils.dart';
 import 'gallery_screen.dart';
 
@@ -169,37 +170,107 @@ class _FolderManagerScreenState extends State<FolderManagerScreen> {
   void _showFolderMenu(FolderInfo folder) {
     showModalBottomSheet(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.folder_zip),
-              title: const Text('ZIP으로 압축'),
-              onTap: () {
-                Navigator.pop(context);
-                _zipFolder(folder);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.share),
-              title: const Text('공유하기'),
-              onTap: () {
-                Navigator.pop(context);
-                _shareFolder(folder);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('폴더 삭제', style: TextStyle(color: Colors.red)),
-              onTap: () {
-                Navigator.pop(context);
-                _deleteFolder(folder);
-              },
-            ),
-          ],
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  folder.name,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              const Divider(),
+              _buildMenuTile(
+                icon: Icons.folder_zip_rounded,
+                title: 'ZIP으로 압축',
+                gradient: AppTheme.primaryGradient,
+                onTap: () {
+                  Navigator.pop(context);
+                  _zipFolder(folder);
+                },
+              ),
+              _buildMenuTile(
+                icon: Icons.share_rounded,
+                title: '공유하기',
+                gradient: AppTheme.secondaryGradient,
+                onTap: () {
+                  Navigator.pop(context);
+                  _shareFolder(folder);
+                },
+              ),
+              _buildMenuTile(
+                icon: Icons.delete_rounded,
+                title: '폴더 삭제',
+                gradient: AppTheme.accentGradient,
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteFolder(folder);
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  /// 메뉴 타일 빌드
+  Widget _buildMenuTile({
+    required IconData icon,
+    required String title,
+    required Gradient gradient,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+      leading: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          gradient: gradient,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: Colors.white, size: 24),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: AppTheme.textPrimary,
+        ),
+      ),
+      trailing: Icon(
+        Icons.arrow_forward_ios_rounded,
+        size: 16,
+        color: Colors.grey.shade400,
+      ),
+      onTap: onTap,
     );
   }
 
@@ -279,13 +350,29 @@ class _FolderManagerScreenState extends State<FolderManagerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
-        title: const Text('폴더 관리'),
+        title: const Text(
+          '폴더 관리',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _addFolder,
-            tooltip: '새 폴더',
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: BoxDecoration(
+              gradient: AppTheme.primaryGradient,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.add, color: Colors.white),
+              onPressed: _addFolder,
+              tooltip: '새 폴더',
+            ),
           ),
         ],
       ),
@@ -296,27 +383,65 @@ class _FolderManagerScreenState extends State<FolderManagerScreen> {
                   child: Text('폴더가 없습니다'),
                 )
               : ListView.builder(
+                  padding: const EdgeInsets.all(16),
                   itemCount: _folders.length,
                   itemBuilder: (context, index) {
                     final folder = _folders[index];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: AppTheme.cardShadow,
                       ),
                       child: ListTile(
-                        leading: const Icon(Icons.folder, size: 40),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                        leading: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            gradient: AppTheme.primaryGradient,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.folder_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        ),
                         title: Text(
                           folder.name,
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
+                            color: AppTheme.textPrimary,
                           ),
                         ),
-                        subtitle: Text('${folder.fileCount}개 파일'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.more_vert),
-                          onPressed: () => _showFolderMenu(folder),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '${folder.fileCount}개 파일',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                        trailing: Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: IconButton(
+                            icon: Icon(
+                              Icons.more_vert,
+                              color: AppTheme.primaryColor,
+                            ),
+                            onPressed: () => _showFolderMenu(folder),
+                          ),
                         ),
                         onTap: () {
                           Navigator.push(

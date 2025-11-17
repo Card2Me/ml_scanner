@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'screens/folder_manager_screen.dart';
 import 'screens/image_detail_screen.dart';
 import 'services/segmentation_service.dart';
+import 'theme/app_theme.dart';
 
 /// 앱 진입점
 Future<void> main() async {
@@ -25,11 +26,10 @@ class MlScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ML Scanner',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
-      ),
+      title: 'Document Scanner',
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      debugShowCheckedModeBanner: false,
       home: const ScannerScreen(),
     );
   }
@@ -232,23 +232,47 @@ class _ScannerScreenState extends State<ScannerScreen>
                 if (_getValidationMessage(_latestResult) != null)
                   Center(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 16,
-                      ),
+                      padding: const EdgeInsets.all(20),
                       margin: const EdgeInsets.symmetric(horizontal: 32),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        _getValidationMessage(_latestResult)!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.warningColor.withOpacity(0.95),
+                            AppTheme.warningColor.withOpacity(0.9),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                        textAlign: TextAlign.center,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.warningColor.withOpacity(0.4),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.info_outline,
+                            color: AppTheme.textPrimary,
+                            size: 28,
+                          ),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Text(
+                              _getValidationMessage(_latestResult)!,
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -338,28 +362,63 @@ class _ScannerScreenState extends State<ScannerScreen>
       return const SizedBox.shrink();
     }
 
+    final isHighConfidence = result.confidence >= 0.85;
+
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.6),
-        borderRadius: BorderRadius.circular(8),
+        gradient: isHighConfidence
+            ? LinearGradient(
+                colors: [
+                  AppTheme.successColor.withOpacity(0.9),
+                  AppTheme.successColor.withOpacity(0.8),
+                ],
+              )
+            : LinearGradient(
+                colors: [
+                  Colors.black.withOpacity(0.7),
+                  Colors.black.withOpacity(0.6),
+                ],
+              ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(
-            '${(result.confidence * 100).toStringAsFixed(0)}%',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isHighConfidence ? Icons.check_circle : Icons.info,
+                color: Colors.white,
+                size: 14,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '${(result.confidence * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 2),
           Text(
             '${result.totalTime.inMilliseconds}ms',
-            style: const TextStyle(color: Colors.white70, fontSize: 10),
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 10,
+            ),
           ),
         ],
       ),
@@ -371,57 +430,74 @@ class _ScannerScreenState extends State<ScannerScreen>
     final canCapture = _canCapture();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 32),
       decoration: BoxDecoration(
-        color: Colors.grey.shade900.withOpacity(0.95),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 상단 메뉴 바
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildIconButton(
-                icon: _isTwoPageMode ? Icons.book : Icons.description,
-                label: _isTwoPageMode ? '2페이지' : '1페이지',
-                onPressed: () {
-                  setState(() {
-                    _isTwoPageMode = !_isTwoPageMode;
-                  });
-                },
-              ),
-              _buildIconButton(
-                icon: _isFlashOn ? Icons.flash_on : Icons.flash_off,
-                label: '플래시',
-                onPressed: _toggleFlash,
-              ),
-              _buildIconButton(
-                icon: Icons.settings,
-                label: '설정',
-                onPressed: () {
-                  // TODO: 설정 화면 열기
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // 중간 행: 폴더 선택, 캡처 버튼, 썸네일
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // 폴더 선택 버튼
-              _buildFolderSelector(),
-              const SizedBox(width: 16),
-              // 캡처 버튼 (중앙)
-              _buildCaptureButton(canCapture),
-              const SizedBox(width: 16),
-              // 썸네일 (또는 빈 공간)
-              _buildThumbnail(),
-            ],
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
           ),
         ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 상단 메뉴 바
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildMenuButton(
+                    icon: _isTwoPageMode ? Icons.menu_book : Icons.description,
+                    label: _isTwoPageMode ? '2페이지' : '1페이지',
+                    isActive: _isTwoPageMode,
+                    onPressed: () {
+                      setState(() {
+                        _isTwoPageMode = !_isTwoPageMode;
+                      });
+                    },
+                  ),
+                  _buildMenuButton(
+                    icon: _isFlashOn ? Icons.flash_on : Icons.flash_off,
+                    label: '플래시',
+                    isActive: _isFlashOn,
+                    onPressed: _toggleFlash,
+                  ),
+                  _buildMenuButton(
+                    icon: Icons.settings,
+                    label: '설정',
+                    isActive: false,
+                    onPressed: () {
+                      // TODO: 설정 화면 열기
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            // 중간 행: 폴더 선택, 캡처 버튼, 썸네일
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // 폴더 선택 버튼
+                Expanded(child: _buildFolderSelector()),
+                const SizedBox(width: 12),
+                // 캡처 버튼 (중앙)
+                _buildCaptureButton(canCapture),
+                const SizedBox(width: 12),
+                // 썸네일 (또는 빈 공간)
+                _buildThumbnail(),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -429,49 +505,78 @@ class _ScannerScreenState extends State<ScannerScreen>
   /// 폴더 선택 드롭다운 빌드
   Widget _buildFolderSelector() {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 8,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: DropdownButton<String>(
-        value: _selectedFolder,
-        dropdownColor: Colors.grey.shade800,
-        underline: const SizedBox.shrink(),
-        style: const TextStyle(color: Colors.white, fontSize: 14),
-        items: [
-          ..._folderFileCounts.keys.map((folder) {
-            final count = _folderFileCounts[folder] ?? 0;
-            return DropdownMenuItem(
-              value: folder,
-              child: Text('$folder ($count)'),
-            );
-          }),
-          const DropdownMenuItem(
-            value: '__manage__',
-            child: Text('폴더 관리...'),
+        color: AppTheme.surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
-        onChanged: (value) async {
-          if (value == '__manage__') {
-            // 폴더 관리 화면 열기
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const FolderManagerScreen(),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.folder, color: AppTheme.primaryColor, size: 20),
+          const SizedBox(width: 8),
+          Flexible(
+            child: DropdownButton<String>(
+              value: _selectedFolder,
+              dropdownColor: AppTheme.surfaceColor,
+              underline: const SizedBox.shrink(),
+              isDense: true,
+              style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
               ),
-            );
-            // 돌아왔을 때 폴더 목록 새로고침
-            await _loadFolders();
-          } else if (value != null) {
-            setState(() {
-              _selectedFolder = value;
-            });
-          }
-        },
+              icon: const Icon(Icons.arrow_drop_down, color: AppTheme.textSecondary),
+              items: [
+                ..._folderFileCounts.keys.map((folder) {
+                  final count = _folderFileCounts[folder] ?? 0;
+                  return DropdownMenuItem(
+                    value: folder,
+                    child: Text(
+                      '$folder ($count)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }),
+                const DropdownMenuItem(
+                  value: '__manage__',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings, size: 16, color: AppTheme.primaryColor),
+                      SizedBox(width: 8),
+                      Text('폴더 관리...'),
+                    ],
+                  ),
+                ),
+              ],
+              onChanged: (value) async {
+                if (value == '__manage__') {
+                  // 폴더 관리 화면 열기
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const FolderManagerScreen(),
+                    ),
+                  );
+                  // 돌아왔을 때 폴더 목록 새로고침
+                  await _loadFolders();
+                } else if (value != null) {
+                  setState(() {
+                    _selectedFolder = value;
+                  });
+                }
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -481,32 +586,72 @@ class _ScannerScreenState extends State<ScannerScreen>
   Widget _buildCaptureButton(bool enabled) {
     return GestureDetector(
       onTap: enabled ? _captureImage : null,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         width: 70,
         height: 70,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: enabled ? Colors.white : Colors.white.withOpacity(0.3),
-          border: Border.all(
-            color: enabled ? Colors.teal : Colors.grey,
-            width: 4,
-          ),
+          gradient: enabled ? AppTheme.primaryGradient : null,
+          color: enabled ? null : Colors.grey.shade300,
           boxShadow: enabled
               ? [
                   BoxShadow(
-                    color: Colors.teal.withOpacity(0.5),
-                    blurRadius: 10,
+                    color: AppTheme.primaryColor.withOpacity(0.4),
+                    blurRadius: 20,
                     spreadRadius: 2,
+                    offset: const Offset(0, 8),
                   ),
                 ]
               : [],
         ),
         child: Center(
           child: Icon(
-            Icons.camera_alt,
-            color: enabled ? Colors.teal : Colors.grey,
+            Icons.camera_alt_rounded,
+            color: enabled ? Colors.white : Colors.grey.shade400,
             size: 32,
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 메뉴 버튼 빌드
+  Widget _buildMenuButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    required bool isActive,
+  }) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive
+              ? AppTheme.primaryColor.withOpacity(0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isActive ? AppTheme.primaryColor : AppTheme.textSecondary,
+              size: 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive ? AppTheme.primaryColor : AppTheme.textSecondary,
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -516,12 +661,14 @@ class _ScannerScreenState extends State<ScannerScreen>
   Widget _buildThumbnail() {
     if (_lastCapturedImagePath == null) {
       return Container(
-        width: 50,
-        height: 50,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
         ),
+        child: Icon(Icons.image, color: Colors.grey.shade400, size: 24),
       );
     }
 
@@ -541,29 +688,43 @@ class _ScannerScreenState extends State<ScannerScreen>
       child: Stack(
         children: [
           Container(
-            width: 50,
-            height: 50,
+            width: 56,
+            height: 56,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(16),
               image: DecorationImage(
                 image: FileImage(File(_lastCapturedImagePath!)),
                 fit: BoxFit.cover,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
           ),
           // 파일 개수 표시
           if (_lastCapturedFolderFileCount > 0)
             Positioned(
-              bottom: 2,
-              right: 2,
+              top: 4,
+              right: 4,
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 2,
+                  horizontal: 6,
+                  vertical: 3,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(4),
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryColor.withOpacity(0.3),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
                 child: Text(
                   '$_lastCapturedFolderFileCount',
@@ -576,32 +737,6 @@ class _ScannerScreenState extends State<ScannerScreen>
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  /// 아이콘 버튼 빌드
-  Widget _buildIconButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onPressed,
-  }) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white, size: 28),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-          ],
-        ),
       ),
     );
   }

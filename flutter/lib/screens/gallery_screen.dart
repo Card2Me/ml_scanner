@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../theme/app_theme.dart';
 import '../utils/file_utils.dart';
 import 'image_detail_screen.dart';
 
@@ -202,30 +203,70 @@ class _GalleryScreenState extends State<GalleryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
-        title: Text(widget.folderName),
+        title: Text(
+          widget.folderName,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
         actions: [
           if (_isSelectionMode) ...[
-            IconButton(
-              icon: const Icon(Icons.share),
-              onPressed: _shareSelectedFiles,
-              tooltip: '공유',
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: AppTheme.secondaryGradient,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.share, color: Colors.white),
+                onPressed: _shareSelectedFiles,
+                tooltip: '공유',
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.picture_as_pdf),
-              onPressed: _convertToPdf,
-              tooltip: 'PDF 변환',
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: AppTheme.primaryGradient,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                onPressed: _convertToPdf,
+                tooltip: 'PDF 변환',
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.delete),
-              onPressed: _deleteSelectedFiles,
-              tooltip: '삭제',
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: AppTheme.accentGradient,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.delete, color: Colors.white),
+                onPressed: _deleteSelectedFiles,
+                tooltip: '삭제',
+              ),
             ),
           ],
-          IconButton(
-            icon: Icon(_isSelectionMode ? Icons.close : Icons.check_box),
-            onPressed: _toggleSelectionMode,
-            tooltip: _isSelectionMode ? '선택 취소' : '선택',
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: BoxDecoration(
+              color: _isSelectionMode ? Colors.grey.shade200 : AppTheme.primaryColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              icon: Icon(
+                _isSelectionMode ? Icons.close : Icons.check_box_outlined,
+                color: _isSelectionMode ? Colors.grey.shade700 : AppTheme.primaryColor,
+              ),
+              onPressed: _toggleSelectionMode,
+              tooltip: _isSelectionMode ? '선택 취소' : '선택',
+            ),
           ),
         ],
       ),
@@ -275,16 +316,25 @@ class _GalleryScreenState extends State<GalleryScreen> {
                           // 썸네일
                           Container(
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                 color: isSelected
-                                    ? Colors.teal
-                                    : Colors.grey.shade300,
-                                width: isSelected ? 3 : 1,
+                                    ? AppTheme.primaryColor
+                                    : Colors.transparent,
+                                width: isSelected ? 3 : 0,
                               ),
+                              boxShadow: isSelected
+                                  ? [
+                                      BoxShadow(
+                                        color: AppTheme.primaryColor.withOpacity(0.3),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ]
+                                  : AppTheme.cardShadow,
                             ),
                             child: ClipRRectangle(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(12),
                               child: file.isPdf
                                   ? _buildPdfThumbnail(file)
                                   : Image.file(
@@ -296,33 +346,51 @@ class _GalleryScreenState extends State<GalleryScreen> {
                           // 선택 체크박스
                           if (_isSelectionMode)
                             Positioned(
-                              top: 4,
-                              right: 4,
+                              top: 8,
+                              right: 8,
                               child: Container(
+                                width: 28,
+                                height: 28,
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  gradient: isSelected ? AppTheme.primaryGradient : null,
+                                  color: isSelected ? null : Colors.white,
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.grey),
+                                  border: Border.all(
+                                    color: isSelected ? Colors.transparent : Colors.grey.shade400,
+                                    width: 2,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.2),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
                                 ),
                                 child: Icon(
-                                  isSelected
-                                      ? Icons.check_circle
-                                      : Icons.circle_outlined,
-                                  color: isSelected ? Colors.teal : Colors.grey,
-                                  size: 24,
+                                  isSelected ? Icons.check : Icons.circle_outlined,
+                                  color: isSelected ? Colors.white : Colors.grey.shade400,
+                                  size: 16,
                                 ),
                               ),
                             ),
                           // PDF 아이콘
                           if (file.isPdf)
                             Positioned(
-                              bottom: 4,
-                              left: 4,
+                              bottom: 8,
+                              left: 8,
                               child: Container(
-                                padding: const EdgeInsets.all(4),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.red,
-                                  borderRadius: BorderRadius.circular(4),
+                                  gradient: AppTheme.accentGradient,
+                                  borderRadius: BorderRadius.circular(8),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppTheme.accentColor.withOpacity(0.3),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
                                 ),
                                 child: const Text(
                                   'PDF',
@@ -330,6 +398,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
                                     color: Colors.white,
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
                                   ),
                                 ),
                               ),
@@ -345,12 +414,21 @@ class _GalleryScreenState extends State<GalleryScreen> {
   /// PDF 썸네일 빌드
   Widget _buildPdfThumbnail(FileInfo file) {
     return Container(
-      color: Colors.red.shade50,
-      child: const Center(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.accentColor.withOpacity(0.1),
+            AppTheme.accentColor.withOpacity(0.05),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
         child: Icon(
-          Icons.picture_as_pdf,
+          Icons.picture_as_pdf_rounded,
           size: 48,
-          color: Colors.red,
+          color: AppTheme.accentColor,
         ),
       ),
     );

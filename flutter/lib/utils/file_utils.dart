@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
-import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -44,9 +43,7 @@ class FileUtils {
         pw.Page(
           pageFormat: PdfPageFormat.a4,
           build: (context) {
-            return pw.Center(
-              child: pw.Image(pdfImage, fit: pw.BoxFit.contain),
-            );
+            return pw.Center(child: pw.Image(pdfImage, fit: pw.BoxFit.contain));
           },
         ),
       );
@@ -100,6 +97,44 @@ class FileUtils {
     return outputPath;
   }
 
+  /// 선택된 파일들을 ZIP으로 압축
+  /// [filePaths] 압축할 파일 경로 목록
+  /// [outputPath] 생성할 ZIP 파일 경로
+  static Future<String> zipFiles({
+    required List<String> filePaths,
+    required String outputPath,
+  }) async {
+    if (filePaths.isEmpty) {
+      throw Exception('압축할 파일이 없습니다');
+    }
+
+    // Archive 생성
+    final archive = Archive();
+
+    for (final path in filePaths) {
+      final file = File(path);
+      if (await file.exists()) {
+        final filename = file.path.split('/').last;
+        final bytes = await file.readAsBytes();
+        archive.addFile(ArchiveFile(filename, bytes.length, bytes));
+      }
+    }
+
+    // ZIP 파일로 인코딩
+    final zipEncoder = ZipEncoder();
+    final zipBytes = zipEncoder.encode(archive);
+
+    if (zipBytes == null) {
+      throw Exception('ZIP 압축 실패');
+    }
+
+    // ZIP 파일 저장
+    final zipFile = File(outputPath);
+    await zipFile.writeAsBytes(zipBytes);
+
+    return outputPath;
+  }
+
   /// 파일 공유
   /// [filePaths] 공유할 파일 경로 목록
   /// [subject] 공유 제목 (선택)
@@ -113,10 +148,7 @@ class FileUtils {
 
     final xFiles = filePaths.map((path) => XFile(path)).toList();
 
-    await Share.shareXFiles(
-      xFiles,
-      subject: subject,
-    );
+    await Share.shareXFiles(xFiles, subject: subject);
   }
 
   /// 임시 파일 경로 생성
@@ -155,5 +187,39 @@ class FileUtils {
     } else {
       return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
     }
+  }
+
+  /// 파일 속성 가져오기
+  static Future<Map<String, String>> getFileProperties(File file) async {
+    final stat = await file.stat();
+    final size = formatFileSize(stat.size);
+    final date = formatDate(stat.modified);
+    final isPdf = file.path.toLowerCase().endsWith('.pdf');
+
+    String resolution = 'N/A';
+    if (!isPdf) {
+      try {
+        final bytes = await file.readAsBytes();
+        final image = img.decodeImage(bytes);
+        if (image != null) {
+          resolution = '${image.width} x ${image.height}';
+        }
+      } catch (_) {
+        resolution = 'Unknown';
+      }
+    }
+
+    return {
+      '파일 크기': size,
+      '수정 날짜': date,
+      if (!isPdf) '해상도': resolution,
+      '경로': file.path,
+    };
+  }
+
+  /// 날짜 포맷팅
+  static String formatDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
+        '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 }

@@ -187,6 +187,18 @@ function displayResult(data) {
     const maskOutput = document.getElementById('mask-output');
     maskOutput.innerHTML = `<img src="${data.mask}" alt="Mask Result">`;
 
+    // Flattened scan 결과
+    const scanOutput = document.getElementById('scan-output');
+    if (data.scan) {
+        scanOutput.innerHTML = `<img src="${data.scan}" alt="Flattened Scan Result">`;
+    } else {
+        scanOutput.innerHTML = `
+            <div class="output-placeholder">
+                <p>Unable to flatten document</p>
+            </div>
+        `;
+    }
+
     // 정보 표시
     const infoSection = document.getElementById('info-section');
     infoSection.style.display = 'block';

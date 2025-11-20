@@ -8,10 +8,12 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+import 'screens/gallery_screen.dart';
 import 'screens/folder_manager_screen.dart';
 import 'screens/image_detail_screen.dart';
 import 'services/segmentation_service.dart';
 import 'theme/app_theme.dart';
+import 'utils/geometry_utils.dart';
 
 /// 앱 진입점
 Future<void> main() async {
@@ -65,8 +67,6 @@ class _ScannerScreenState extends State<ScannerScreen>
   bool _isTwoPageMode = false; // 2페이지 스캔 모드
   String _selectedFolder = '기본'; // 선택된 폴더
   final Map<String, int> _folderFileCounts = {}; // 폴더별 파일 개수
-  String? _lastCapturedImagePath; // 마지막 캡처된 이미지 경로
-  int _lastCapturedFolderFileCount = 0; // 마지막 캡처된 폴더의 파일 개수
 
   @override
   void initState() {
@@ -100,7 +100,7 @@ class _ScannerScreenState extends State<ScannerScreen>
 
     final controller = CameraController(
       cameras.first,
-      ResolutionPreset.low,
+      ResolutionPreset.max,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
@@ -336,14 +336,31 @@ class _ScannerScreenState extends State<ScannerScreen>
                     child: SizedBox(
                       width: _latestResult!.maskWidth.toDouble(),
                       height: _latestResult!.maskHeight.toDouble(),
-                      child: CustomPaint(
-                        painter: _OutlinePainter(
-                          polygon: _latestResult!.polygon,
-                          corners: _latestResult!.corners,
-                          maskWidth: _latestResult!.maskWidth.toDouble(),
-                          maskHeight: _latestResult!.maskHeight.toDouble(),
-                          confidence: _latestResult!.confidence,
-                        ),
+                      child: Stack(
+                        children: [
+                          // 세그먼트 마스크 오버레이
+                          Image.memory(
+                            _latestResult!.maskBytes,
+                            width: _latestResult!.maskWidth.toDouble(),
+                            height: _latestResult!.maskHeight.toDouble(),
+                            fit: BoxFit.fill,
+                            gaplessPlayback: true,
+                          ),
+                          // 외곽선 및 코너
+                          CustomPaint(
+                            size: Size(
+                              _latestResult!.maskWidth.toDouble(),
+                              _latestResult!.maskHeight.toDouble(),
+                            ),
+                            painter: _OutlinePainter(
+                              polygon: _latestResult!.polygon,
+                              corners: _latestResult!.corners,
+                              maskWidth: _latestResult!.maskWidth.toDouble(),
+                              maskHeight: _latestResult!.maskHeight.toDouble(),
+                              confidence: _latestResult!.confidence,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -486,14 +503,24 @@ class _ScannerScreenState extends State<ScannerScreen>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // 폴더 선택 버튼
-                Expanded(child: _buildFolderSelector()),
-                const SizedBox(width: 12),
-                // 캡처 버튼 (중앙)
+                // 좌측: 폴더 선택 (Expanded로 공간 확보하되, 중앙 침범 안하게)
+                Expanded(
+                  flex: 1,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _buildFolderSelector(),
+                  ),
+                ),
+                // 중앙: 캡처 버튼
                 _buildCaptureButton(canCapture),
-                const SizedBox(width: 12),
-                // 썸네일 (또는 빈 공간)
-                _buildThumbnail(),
+                // 우측: 썸네일 (좌측과 대칭을 위해 Expanded 사용)
+                Expanded(
+                  flex: 1,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _buildThumbnail(),
+                  ),
+                ),
               ],
             ),
           ],
@@ -505,7 +532,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   /// 폴더 선택 드롭다운 빌드
   Widget _buildFolderSelector() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
       decoration: BoxDecoration(
         color: AppTheme.surfaceColor,
         borderRadius: BorderRadius.circular(16),
@@ -666,84 +693,123 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
-  /// 썸네일 빌드
-  Widget _buildThumbnail() {
-    if (_lastCapturedImagePath == null) {
-      return Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Icon(Icons.image, color: Colors.grey.shade400, size: 24),
-      );
+  /// 최신 이미지 가져오기
+  Future<File?> _getLatestImage() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final folderPath = '${directory.path}/ml_scanner/$_selectedFolder';
+    final folder = Directory(folderPath);
+
+    if (!await folder.exists()) {
+      return null;
     }
 
-    return GestureDetector(
-      onTap: () {
-        // 이미지 상세 화면으로 이동
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ImageDetailScreen(
-              imagePath: _lastCapturedImagePath!,
-              imageTitle: _lastCapturedImagePath!.split('/').last,
-            ),
-          ),
-        );
-      },
-      child: Stack(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              image: DecorationImage(
-                image: FileImage(File(_lastCapturedImagePath!)),
-                fit: BoxFit.cover,
+    final entities = await folder.list().toList();
+    final files = entities.whereType<File>().where((file) {
+      final path = file.path.toLowerCase();
+      return path.endsWith('.png') ||
+          path.endsWith('.jpg') ||
+          path.endsWith('.jpeg');
+    }).toList();
+
+    if (files.isEmpty) {
+      return null;
+    }
+
+    // 수정 날짜 내림차순 정렬
+    files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+
+    return files.first;
+  }
+
+  /// 썸네일 빌드
+  Widget _buildThumbnail() {
+    return FutureBuilder<File?>(
+      future: _getLatestImage(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data == null) {
+          return GestureDetector(
+            onTap: () async {
+              final directory = await getApplicationDocumentsDirectory();
+              final folderPath =
+                  '${directory.path}/ml_scanner/$_selectedFolder';
+
+              if (!context.mounted) return;
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => GalleryScreen(
+                    folderName: _selectedFolder,
+                    folderPath: folderPath,
+                  ),
+                ),
+              ).then((_) => _loadFolders());
+            },
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
               ),
+              child: const Icon(
+                Icons.photo_library_outlined,
+                color: Colors.grey,
+              ),
+            ),
+          );
+        }
+
+        final file = snapshot.data!;
+        return GestureDetector(
+          onTap: () async {
+            final directory = await getApplicationDocumentsDirectory();
+            final folderPath = '${directory.path}/ml_scanner/$_selectedFolder';
+
+            if (!context.mounted) return;
+
+            // 최신 이미지의 상세 화면으로 이동
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ImageDetailScreen(
+                  initialFile: file,
+                  folderPath: folderPath,
+                ),
+              ),
+            ).then((_) => _loadFolders());
+          },
+          child: Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white, width: 2),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
+                  color: Colors.black.withOpacity(0.2),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
               ],
             ),
-          ),
-          // 파일 개수 표시
-          if (_lastCapturedFolderFileCount > 0)
-            Positioned(
-              top: 4,
-              right: 4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryColor.withOpacity(0.3),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  '$_lastCapturedFolderFileCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.file(
+                file,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: Colors.grey.shade200,
+                    child: const Icon(Icons.error_outline, color: Colors.grey),
+                  );
+                },
               ),
             ),
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -789,8 +855,11 @@ class _ScannerScreenState extends State<ScannerScreen>
       // 1. 이미지 스트림 중지
       await _stopImageStream();
 
-      // 2. 고해상도 사진 촬영
+      // 2. 초점 고정 및 고해상도 사진 촬영
+      await controller.setFocusMode(FocusMode.locked);
       final xfile = await controller.takePicture();
+      await controller.setFocusMode(FocusMode.auto);
+
       final imageBytes = await xfile.readAsBytes();
       final capturedImage = img.decodeImage(imageBytes);
 
@@ -799,21 +868,38 @@ class _ScannerScreenState extends State<ScannerScreen>
       }
 
       // 3. 방향 적용
-      final oriented = _applyOrientation(capturedImage);
+      // decodeImage가 이미 EXIF를 처리했을 수 있으므로,
+      // 프리뷰(result)와 캡처된 이미지의 종횡비가 다를 때만 회전을 적용합니다.
+      img.Image oriented = capturedImage;
+      final isPreviewPortrait = result.maskHeight > result.maskWidth;
+      final isCapturePortrait = capturedImage.height > capturedImage.width;
 
-      // 4. 4각형 영역 잘라내기
-      final croppedImage = _cropImageWithPerspective(oriented, result.corners!);
+      if (isPreviewPortrait != isCapturePortrait) {
+        oriented = _applyOrientation(capturedImage);
+      }
 
-      // 5. 선택된 폴더에 저장
-      final savedPath = await _saveImage(croppedImage, _selectedFolder);
+      // 4. 캡처된 고해상도 이미지에 대해 다시 세그멘테이션 수행
+      // 프리뷰 결과 대신 실제 캡처된 이미지에서 정확한 좌표를 찾음
+      final captureResult = await _segmentationService.segmentImage(oriented);
 
-      // 6. 폴더 파일 개수 업데이트
+      if (captureResult.corners == null || captureResult.corners!.length < 4) {
+        _showSnackBar('캡처된 이미지에서 문서를 찾을 수 없습니다.');
+        await _startImageStream();
+        return;
+      }
+
+      // 5. 4각형 영역 잘라내기
+      // captureResult.corners는 이미 oriented 이미지 크기에 맞춰져 있음
+      final croppedImage = _cropImageWithPerspective(
+        oriented,
+        captureResult.corners!,
+      );
+
+      // 6. 선택된 폴더에 저장
+      await _saveImage(croppedImage, _selectedFolder);
+
+      // 7. 폴더 파일 개수 업데이트
       await _loadFolders();
-
-      setState(() {
-        _lastCapturedImagePath = savedPath;
-        _lastCapturedFolderFileCount = _folderFileCounts[_selectedFolder] ?? 0;
-      });
 
       _showSnackBar('이미지가 저장되었습니다.');
 
@@ -859,7 +945,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     // 4개의 코너로 원근 변환 사용
-    final warped = PerspectiveTransform.warpPerspective(source, corners);
+    final warped = GeometryUtils.warpPerspective(source, corners);
     return warped ?? source;
   }
 
@@ -1100,28 +1186,46 @@ class _OutlinePainter extends CustomPainter {
 }
 
 /// YUV420 이미지를 RGB 이미지로 변환
-img.Image _convertYuv420ToImage(CameraImage image) {
+/// YUV420 이미지를 RGB 이미지로 변환 (다운샘플링 포함)
+img.Image _convertYuv420ToImage(CameraImage image, {int targetSize = 256}) {
   final width = image.width;
   final height = image.height;
-  final img.Image output = img.Image(width: width, height: height);
+
+  // 원본 비율 유지하면서 targetSize에 맞춤
+  // 모델 입력이 256x256이므로, 긴 쪽을 256으로 맞추거나,
+  // 그냥 256x256으로 찌그러뜨려서 보낼 수도 있음.
+  // 기존 로직은 copyResize(width: 256, height: 256)으로 찌그러뜨림.
+  // 여기서도 256x256으로 바로 변환하는 것이 가장 빠름.
+
+  final targetWidth = targetSize;
+  final targetHeight = targetSize;
+
+  final img.Image output = img.Image(width: targetWidth, height: targetHeight);
 
   final yPlane = image.planes[0];
   final uPlane = image.planes[1];
   final vPlane = image.planes[2];
+
   final yBytes = yPlane.bytes;
   final uBytes = uPlane.bytes;
   final vBytes = vPlane.bytes;
+
   final yRowStride = yPlane.bytesPerRow;
   final uRowStride = uPlane.bytesPerRow;
   final vRowStride = vPlane.bytesPerRow;
+
   final uPixelStride = uPlane.bytesPerPixel ?? 1;
   final vPixelStride = vPlane.bytesPerPixel ?? 1;
 
-  for (var y = 0; y < height; y++) {
-    for (var x = 0; x < width; x++) {
-      final yIndex = y * yRowStride + x;
-      final uvRow = y ~/ 2;
-      final uvCol = x ~/ 2;
+  for (var y = 0; y < targetHeight; y++) {
+    for (var x = 0; x < targetWidth; x++) {
+      // 원본 좌표 매핑 (Nearest Neighbor)
+      final srcX = (x * width / targetWidth).floor();
+      final srcY = (y * height / targetHeight).floor();
+
+      final yIndex = srcY * yRowStride + srcX;
+      final uvRow = srcY ~/ 2;
+      final uvCol = srcX ~/ 2;
       final uIndex = uvRow * uRowStride + uvCol * uPixelStride;
       final vIndex = uvRow * vRowStride + uvCol * vPixelStride;
 
@@ -1134,6 +1238,7 @@ img.Image _convertYuv420ToImage(CameraImage image) {
           .round()
           .clamp(0, 255);
       final b = (yValue + 1.772 * (uValue - 128)).round().clamp(0, 255);
+
       output.setPixelRgba(x, y, r, g, b, 255);
     }
   }

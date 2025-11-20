@@ -139,20 +139,91 @@ def create_overlay(image, mask, alpha=0.5):
     return overlay
 
 def find_document_contours(mask):
-    """문서 경계선 찾기"""
+    """문서 경계선 및 근사 다각형 계산"""
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
-        return None
+        return None, None
 
-    # 가장 큰 contour 선택
     largest_contour = max(contours, key=cv2.contourArea)
-
-    # Convex hull 또는 approxPolyDP로 단순화
     epsilon = 0.02 * cv2.arcLength(largest_contour, True)
     approx = cv2.approxPolyDP(largest_contour, epsilon, True)
 
-    return approx
+    return largest_contour, approx
+
+
+def get_document_quadrilateral(contour, approx):
+    """컨투어를 기반으로 문서 4각형 근사"""
+    if contour is None:
+        return None
+
+    if approx is not None and len(approx) >= 4:
+        approx_points = approx.reshape(-1, 2).astype(np.float32)
+        if len(approx_points) == 4:
+            return approx_points
+        elif len(approx_points) > 4:
+            hull = cv2.convexHull(approx_points)
+            if hull.ndim == 2:
+                hull_contour = hull.reshape(-1, 1, 2)
+            else:
+                hull_contour = hull
+            perimeter = cv2.arcLength(hull_contour, True)
+            hull_poly = cv2.approxPolyDP(hull_contour, 0.05 * perimeter, True)
+            if len(hull_poly) == 4:
+                return hull_poly.reshape(4, 2).astype(np.float32)
+
+    rect = cv2.minAreaRect(contour)
+    box = cv2.boxPoints(rect)
+    return box.astype(np.float32)
+
+
+def order_points(points):
+    """관점 변환을 위한 4개의 점 정렬"""
+    pts = np.array(points, dtype=np.float32)
+    if pts.shape[0] != 4:
+        return None
+
+    rect = np.zeros((4, 2), dtype=np.float32)
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]  # top-left
+    rect[2] = pts[np.argmax(s)]  # bottom-right
+
+    diff = np.diff(pts, axis=1)
+    rect[1] = pts[np.argmin(diff)]  # top-right
+    rect[3] = pts[np.argmax(diff)]  # bottom-left
+    return rect
+
+
+def flatten_document(image, quad_points):
+    """4각형 근사 결과를 사용해 문서를 평탄화"""
+    if quad_points is None or len(quad_points) != 4:
+        return None
+
+    rect = order_points(quad_points)
+    if rect is None:
+        return None
+
+    width_a = np.linalg.norm(rect[2] - rect[3])
+    width_b = np.linalg.norm(rect[1] - rect[0])
+    height_a = np.linalg.norm(rect[1] - rect[2])
+    height_b = np.linalg.norm(rect[0] - rect[3])
+
+    max_width = max(int(round(width_a)), int(round(width_b)))
+    max_height = max(int(round(height_a)), int(round(height_b)))
+
+    if max_width < 1 or max_height < 1:
+        return None
+
+    destination = np.array([
+        [0, 0],
+        [max_width - 1, 0],
+        [max_width - 1, max_height - 1],
+        [0, max_height - 1]
+    ], dtype=np.float32)
+
+    M = cv2.getPerspectiveTransform(rect, destination)
+    warped = cv2.warpPerspective(image, M, (max_width, max_height))
+    return warped
 
 @app.route('/')
 def index():
@@ -227,12 +298,28 @@ def predict():
         overlay = create_overlay(image_rgb, pred_mask)
 
         # 경계선 찾기
-        contours = find_document_contours(pred_mask)
-        if contours is not None:
+        contour, approx = find_document_contours(pred_mask)
+        if approx is not None:
             overlay_with_contours = overlay.copy()
-            cv2.drawContours(overlay_with_contours, [contours], -1, (255, 0, 0), 3)
+            cv2.drawContours(overlay_with_contours, [approx], -1, (255, 0, 0), 3)
+        elif contour is not None:
+            overlay_with_contours = overlay.copy()
+            cv2.drawContours(overlay_with_contours, [contour], -1, (255, 0, 0), 2)
         else:
             overlay_with_contours = overlay
+
+        # 문서 평탄화
+        quad = get_document_quadrilateral(contour, approx)
+        flattened_scan = flatten_document(image_rgb, quad)
+        scan_data = None
+        if flattened_scan is not None:
+            if len(flattened_scan.shape) == 3 and flattened_scan.shape[2] == 3:
+                flattened_bgr = cv2.cvtColor(flattened_scan, cv2.COLOR_RGB2BGR)
+            else:
+                flattened_bgr = flattened_scan
+            _, scan_buffer = cv2.imencode('.png', flattened_bgr)
+            scan_base64 = base64.b64encode(scan_buffer).decode('utf-8')
+            scan_data = f'data:image/png;base64,{scan_base64}'
 
         # 이미지를 base64로 인코딩
         _, buffer = cv2.imencode('.png', cv2.cvtColor(overlay_with_contours, cv2.COLOR_RGB2BGR))
@@ -245,6 +332,7 @@ def predict():
             'success': True,
             'overlay': f'data:image/png;base64,{overlay_base64}',
             'mask': f'data:image/png;base64,{mask_base64}',
+            'scan': scan_data,
             'model': model_name
         })
 
